@@ -7,38 +7,33 @@
 
   let project    = $derived(store.selectedProject!);
   let showForm   = $state(false);
+  let loading    = $state(false);  // local — avoids class $state async reactivity issues
 
   async function refresh(force = false) {
-    if (!force && Date.now() - store.tunnelsCacheTs < 30_000 && store.tunnels.length > 0) return;
-    store.tunnelsLoading = true;
+    if (!force && store.tunnels.length > 0) return;
+    loading = true;
     try {
       store.tunnels = await api.listProjectTunnels(project);
-      store.tunnelsCacheTs = Date.now();
     } catch (e) {
       store.appendLog(`Error listing tunnels: ${e instanceof Error ? e.message : JSON.stringify(e)}`);
     } finally {
-      store.tunnelsLoading = false;
+      loading = false;
     }
   }
 
-  // Refresh whenever the selected project changes; reset cache on project switch
   $effect(() => {
     const id = store.selectedId;
-    if (id) { store.tunnelsCacheTs = 0; refresh(); }
+    if (id) { store.tunnels = []; refresh(); }
   });
 
-  const authBadge = $derived(
-    project.auth_mode === 'token' ? 'API token' : 'cloudflared'
-  );
+  const authBadge = $derived(project.auth_mode === 'token' ? 'API token' : 'cloudflared');
 
-  // Return to AuthSetup to re-authenticate (browser projects only)
   async function reauth() {
     const updated = { ...project, browser_authed: false };
     await api.upsertProject(updated);
     store.upsertProject(updated);
   }
 
-  // Return to AuthSetup to re-enter credentials (token projects only)
   async function reconfig() {
     await api.reconfigureProject(project.id);
     store.upsertProject({ ...project, api_token: '', account_id: '', domain: '' });
@@ -71,15 +66,11 @@
     <div class="flex items-center gap-2">
       <!-- Refresh -->
       <button
-        class="btn btn-ghost btn-sm gap-1.5 text-base-content/60 hover:text-base-content"
+        class="btn btn-ghost btn-sm gap-1.5"
         onclick={() => refresh(true)}
-        disabled={store.tunnelsLoading}
+        disabled={loading}
       >
-        {#if store.tunnelsLoading}
-          <span class="loading loading-spinner loading-xs"></span>
-        {:else}
-          <RefreshCw class="w-3.5 h-3.5" strokeWidth={2} />
-        {/if}
+        <RefreshCw class="w-3.5 h-3.5 {loading ? 'animate-spin' : ''}" strokeWidth={2} />
         Refresh
       </button>
       <!-- Add tunnel -->
@@ -103,9 +94,9 @@
     <TunnelForm onSuccess={() => (showForm = false)} onCancel={() => (showForm = false)} />
   {/if}
 
-  <!-- Tunnel table -->
+  <!-- Tunnel list -->
   <div class="rounded-xl border border-base-300 bg-base-200 overflow-hidden">
-{#if store.tunnelsLoading && store.tunnels.length === 0}
+    {#if loading && store.tunnels.length === 0}
       <div class="flex items-center justify-center gap-2 py-8 text-base-content/30">
         <span class="loading loading-spinner loading-sm"></span>
         <span class="text-xs">Loading tunnels…</span>
@@ -113,10 +104,8 @@
     {:else if store.tunnels.length === 0}
       <div class="flex flex-col items-center justify-center py-10 gap-2">
         <p class="text-sm text-base-content/30">No tunnels yet</p>
-        <button
-          class="btn btn-ghost btn-xs text-base-content/40 gap-1"
-          onclick={() => (showForm = true)}
-        >
+        <button class="btn btn-ghost btn-xs text-base-content/40 gap-1"
+                onclick={() => (showForm = true)}>
           <Plus class="w-3 h-3" strokeWidth={2} />
           Add your first tunnel
         </button>
