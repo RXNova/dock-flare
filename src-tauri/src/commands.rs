@@ -135,6 +135,7 @@ pub async fn deploy_tunnel(
 
     orchestrate::emit(&app, "=== Deploy complete ===");
 
+    let health_hostname = tunnel.public_hostname.clone();
     let mut projects = config::load(&app);
     if let Some(p) = projects.iter_mut().find(|p| p.id == project.id) {
         p.tunnels.retain(|t| t.name != tunnel.tunnel_name);
@@ -151,7 +152,7 @@ pub async fn deploy_tunnel(
     config::save(&app, &projects);
 
     // Best-effort health check — never fails the deploy
-    let hostname = tunnel.public_hostname.clone();
+    let hostname = health_hostname;
     let app_hc = app.clone();
     let client_hc = client_state.0.clone();
     tokio::spawn(async move {
