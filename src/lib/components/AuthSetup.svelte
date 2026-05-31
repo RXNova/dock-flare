@@ -2,20 +2,26 @@
   import { store } from '$lib/store.svelte';
   import { api } from '$lib/api';
 
-  let project = $derived(store.selectedProject!);
-  let saving  = $state(false);
+  let project    = $derived(store.selectedProject!);
+  let saving     = $state(false);
+  let cfAuthorized = $state(false);  // per-project cert exists
 
   // Local editable copies of credentials
   let apiToken   = $state('');
   let accountId  = $state('');
   let authMode   = $state<'token' | 'browser'>('token');
 
-  // Sync when project changes
+  // Sync when project changes and check per-project cert
   $effect(() => {
     if (project) {
-      apiToken  = project.api_token  ?? '';
-      accountId = project.account_id ?? '';
-      authMode  = project.auth_mode;
+      apiToken     = project.api_token  ?? '';
+      accountId    = project.account_id ?? '';
+      authMode     = project.auth_mode as 'token' | 'browser';
+      cfAuthorized = project.browser_authed ?? false;
+      // Verify the cert file actually exists on disk
+      if (project.auth_mode === 'browser') {
+        api.checkCfAuth(project.id).then(v => { cfAuthorized = v; });
+      }
     }
   });
 
@@ -31,11 +37,11 @@
     store.status = 'processing';
     store.clearLogs();
     try {
-      await api.cloudflaredLogin();
-      store.cfAuthorized = true;
+      await api.cloudflaredLogin(project.id);
+      cfAuthorized = true;
       store.status = 'idle';
-      // Switch auth mode + save
-      const updated = { ...project, auth_mode: 'browser' as const };
+      // Persist auth_mode + browser_authed flag
+      const updated = { ...project, auth_mode: 'browser' as const, browser_authed: true };
       await api.upsertProject(updated);
       store.upsertProject(updated);
     } catch (e) {

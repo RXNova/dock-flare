@@ -24,7 +24,7 @@
     {/if}
   </div>
   <div
-    class="p-3 h-36 overflow-y-auto font-mono text-[11px] leading-[1.6]"
+    class="p-3 h-36 overflow-y-auto font-mono text-[11px] leading-[1.6] select-text cursor-text"
     bind:this={logEl}
   >
     {#if store.logs.length === 0}

@@ -16,6 +16,11 @@ fn cf_home() -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cloudflared")
 }
 
+/// Per-project cert path so multiple Cloudflare accounts don't share ~/.cloudflared/cert.pem.
+pub fn project_cert_path(project_id: &str) -> std::path::PathBuf {
+    cf_home().join(format!("dockflare-{}.pem", project_id))
+}
+
 pub async fn check_bin(name: &str) -> Result<(), String> {
     let ok = tokio::process::Command::new("which")
         .arg(name)
@@ -150,13 +155,17 @@ pub async fn deploy_token(
 
 pub async fn deploy_browser(
     app: &AppHandle,
+    project_id: &str,
     tunnel: &TunnelConfig,
 ) -> Result<String, String> {
+    let cert = project_cert_path(project_id);
+    let cert_str = cert.to_str().unwrap();
+
     emit(app, "[1/5] Checking prerequisites...");
     for bin in &["cloudflared", "kubectl"] {
         check_bin(bin).await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
     }
-    if !cf_home().join("cert.pem").exists() {
+    if !cert.exists() {
         let msg = "Not authorized — authenticate this project first";
         emit(app, &format!("ERROR: {}", msg));
         return Err(msg.to_string());
@@ -164,7 +173,7 @@ pub async fn deploy_browser(
     emit(app, "  -> Prerequisites OK");
 
     emit(app, "[2/5] Creating tunnel...");
-    let out = run_silent("cloudflared", &["tunnel", "create", &tunnel.tunnel_name])
+    let out = run_silent("cloudflared", &["--origincert", cert_str, "tunnel", "create", &tunnel.tunnel_name])
         .await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
     let tunnel_id = out.lines()
         .find(|l| l.contains("with id "))
@@ -175,11 +184,11 @@ pub async fn deploy_browser(
 
     emit(app, "[3/5] Routing DNS...");
     if let Err(e) = run_streamed(app, "cloudflared",
-        &["tunnel", "route", "dns", &tunnel.tunnel_name, &tunnel.public_hostname]).await
+        &["--origincert", cert_str, "tunnel", "route", "dns", &tunnel.tunnel_name, &tunnel.public_hostname]).await
     {
         emit(app, &format!("ERROR: {}", e));
         emit(app, "  -> Cleaning up orphaned tunnel...");
-        run_silent("cloudflared", &["tunnel", "delete", "-f", &tunnel.tunnel_name]).await.ok();
+        run_silent("cloudflared", &["--origincert", cert_str, "tunnel", "delete", "-f", &tunnel.tunnel_name]).await.ok();
         return Err(format!(
             "DNS routing failed for '{}'. Tunnel deleted. Make sure the hostname belongs to an authorized zone.",
             tunnel.public_hostname
@@ -329,16 +338,20 @@ pub async fn teardown_token(
 
 pub async fn teardown_browser(
     app: &AppHandle,
+    project_id: &str,
     tunnel_name: &str,
     namespace: &str,
 ) -> Result<(), String> {
+    let cert = project_cert_path(project_id);
+    let cert_str = cert.to_str().unwrap();
+
     emit(app, "[1/2] Removing K8s deployment...");
     run_streamed(app, "kubectl", &["delete", "namespace", namespace, "--ignore-not-found"])
         .await.ok();
     emit(app, "  -> Namespace removed");
 
     emit(app, "[2/2] Deleting cloudflared tunnel...");
-    run_streamed(app, "cloudflared", &["tunnel", "delete", "-f", tunnel_name])
+    run_streamed(app, "cloudflared", &["--origincert", cert_str, "tunnel", "delete", "-f", tunnel_name])
         .await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
     emit(app, "  -> Tunnel deleted");
 

@@ -11,6 +11,10 @@ pub struct Project {
     pub api_token: String,
     #[serde(default)]
     pub account_id: String,
+    /// Set to true after a successful cloudflared login for this project.
+    /// Stored so the sidebar auth dot works without an extra disk check on every render.
+    #[serde(default)]
+    pub browser_authed: bool,
     #[serde(default)]
     pub tunnels: Vec<TunnelMeta>,
 }

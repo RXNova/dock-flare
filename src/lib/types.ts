@@ -4,6 +4,7 @@ export interface Project {
   auth_mode: 'token' | 'browser';
   api_token: string;
   account_id: string;
+  browser_authed: boolean;
 }
 
 export interface TunnelInfo {

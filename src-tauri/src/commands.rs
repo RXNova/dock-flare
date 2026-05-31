@@ -95,7 +95,7 @@ pub async fn deploy_tunnel(
     orchestrate::emit(&app, &format!("=== DockFlare Deploy [{}] ===", project.domain));
 
     let tunnel_id = if project.auth_mode == "browser" {
-        orchestrate::deploy_browser(&app, &tunnel).await
+        orchestrate::deploy_browser(&app, &project.id, &tunnel).await
     } else {
         orchestrate::deploy_token(&app, &project, &tunnel).await
     }?;
@@ -132,7 +132,7 @@ pub async fn teardown_tunnel(
     orchestrate::emit(&app, &format!("=== DockFlare Teardown [{}] ===", project.domain));
 
     let result = if project.auth_mode == "browser" {
-        orchestrate::teardown_browser(&app, &tunnel_name, &namespace).await
+        orchestrate::teardown_browser(&app, &project.id, &tunnel_name, &namespace).await
     } else {
         orchestrate::teardown_token(&app, &project, &tunnel_name, &hostname, &namespace).await
     };
@@ -158,10 +158,8 @@ pub async fn check_cloudflared() -> bool {
 }
 
 #[tauri::command]
-pub fn check_cf_auth() -> bool {
-    std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
-        .join(".cloudflared/cert.pem")
-        .exists()
+pub fn check_cf_auth(project_id: String) -> bool {
+    orchestrate::project_cert_path(&project_id).exists()
 }
 
 #[tauri::command]
@@ -176,10 +174,12 @@ pub async fn install_cloudflared(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn cloudflared_login(app: AppHandle) -> Result<(), String> {
-    orchestrate::emit(&app, "Opening Cloudflare authorization in your browser...");
+pub async fn cloudflared_login(app: AppHandle, project_id: String) -> Result<(), String> {
+    let cert = orchestrate::project_cert_path(&project_id);
+    let cert_str = cert.to_str().unwrap().to_string();
+    orchestrate::emit(&app, &format!("Authorizing project — cert will be saved to {}", cert_str));
     orchestrate::emit(&app, "(If the browser doesn't open, copy the URL printed below.)");
-    orchestrate::run_streamed(&app, "cloudflared", &["tunnel", "login"]).await?;
+    orchestrate::run_streamed(&app, "cloudflared", &["--origincert", &cert_str, "tunnel", "login"]).await?;
     orchestrate::emit(&app, "Authorization complete.");
     Ok(())
 }

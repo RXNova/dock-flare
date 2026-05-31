@@ -23,9 +23,8 @@
     // Load projects from disk
     store.projects = await api.getProjects();
 
-    // Check cloudflared
+    // Check cloudflared binary (shared; per-project cert checked in AuthSetup)
     store.cloudflaredFound = await api.checkCloudflared();
-    if (store.cloudflaredFound) store.cfAuthorized = await api.checkCfAuth();
 
     // Stream log events from Rust
     unlisten = await listen<string>('log', (e) => {

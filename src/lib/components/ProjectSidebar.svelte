@@ -10,7 +10,7 @@
   function isAuthenticated(p: Project): boolean {
     return p.auth_mode === 'token'
       ? !!(p.api_token && p.account_id)
-      : (store.cfAuthorized && store.cloudflaredFound === true);
+      : p.browser_authed === true;
   }
 
   async function addProject() {

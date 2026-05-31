@@ -17,9 +17,9 @@ export const api = {
   teardownTunnel: (p: Project, tunnelName: string, hostname: string, namespace: string) =>
     invoke<void>('teardown_tunnel', { project: p, tunnelName, hostname, namespace }),
 
-  // cloudflared
-  checkCloudflared:   ()  => invoke<boolean>('check_cloudflared'),
-  checkCfAuth:        ()  => invoke<boolean>('check_cf_auth'),
-  cloudflaredLogin:   ()  => invoke<void>('cloudflared_login'),
-  installCloudflared: ()  => invoke<void>('install_cloudflared'),
+  // cloudflared — auth is per-project (each gets its own cert file)
+  checkCloudflared:   ()                   => invoke<boolean>('check_cloudflared'),
+  checkCfAuth:        (projectId: string)  => invoke<boolean>('check_cf_auth', { projectId }),
+  cloudflaredLogin:   (projectId: string)  => invoke<void>('cloudflared_login', { projectId }),
+  installCloudflared: ()                   => invoke<void>('install_cloudflared'),
 };

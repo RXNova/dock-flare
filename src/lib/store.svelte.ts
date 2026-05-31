@@ -16,9 +16,8 @@ class AppStore {
   tunnels        = $state<TunnelInfo[]>([]);
   tunnelsLoading = $state(false);
 
-  // ── cloudflared (browser auth) ─────────────────────────────
+  // ── cloudflared binary check (global, not per-project) ───────
   cloudflaredFound = $state<boolean | null>(null);
-  cfAuthorized     = $state(false);
 
   // ── Operation status ──────────────────────────────────────
   status = $state<AppStatus>('idle');
