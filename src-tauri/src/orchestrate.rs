@@ -49,6 +49,45 @@ pub async fn run_silent(prog: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
+/// Like run_silent but kills the child and returns Err("timeout") if it exceeds the limit.
+pub async fn run_silent_timeout(
+    prog: &str,
+    args: &[&str],
+    secs: u64,
+) -> Result<String, String> {
+    let mut child = tokio::process::Command::new(prog)
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("spawn '{}': {}", prog, e))?;
+
+    let pid = child.id();
+
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(secs),
+        child.wait_with_output(),
+    )
+    .await
+    {
+        Ok(Ok(out)) => {
+            if out.status.success() {
+                Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+            } else {
+                Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+            }
+        }
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => {
+            // kill by PID since wait_with_output consumed the Child handle
+            if let Some(pid) = pid {
+                let _ = tokio::process::Command::new("kill").arg(pid.to_string()).output().await;
+            }
+            Err("timeout".to_string())
+        }
+    }
+}
+
 pub async fn run_streamed(app: &AppHandle, prog: &str, args: &[&str]) -> Result<(), String> {
     let mut child = tokio::process::Command::new(prog)
         .args(args)

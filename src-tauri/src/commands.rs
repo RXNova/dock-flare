@@ -164,43 +164,57 @@ pub async fn verify_domain_auth(
 ) -> Result<DomainAuthResult, String> {
     let cert = orchestrate::project_cert_path(&project_id);
     if !cert.exists() {
-        return Ok(DomainAuthResult { ok: false, detail: "No cert found for this project.".into() });
+        return Ok(DomainAuthResult { ok: false, certain: true, detail: "No cert found for this project.".into() });
     }
     let cert_str = cert.to_str().unwrap().to_string();
 
     orchestrate::emit(&app, &format!("  -> Verifying cert covers '{}'…", domain));
 
-    let result = orchestrate::run_silent("cloudflared", &[
+    // 10-second timeout — kills the child if cloudflared hangs
+    let result = orchestrate::run_silent_timeout("cloudflared", &[
         "--origincert", &cert_str,
         "tunnel", "route", "dns",
         "dockflare-verify-000", &domain,
-    ]).await;
+    ], 10).await;
 
     match result {
-        Ok(_) => Ok(DomainAuthResult { ok: true, detail: format!("Domain '{}' is accessible.", domain) }),
+        Ok(_) => Ok(DomainAuthResult {
+            ok: true,
+            certain: true,
+            detail: format!("Domain '{}' is accessible.", domain),
+        }),
+        Err(e) if e == "timeout" => Ok(DomainAuthResult {
+            ok: true,   // inconclusive — don't block the user
+            certain: false,
+            detail: "Verification timed out. You can still continue; if the domain is wrong you'll see an error at deploy time.".into(),
+        }),
         Err(e) => {
             let lower = e.to_lowercase();
-            // "not found" / "does not exist" → tunnel missing but zone IS reachable
             if lower.contains("not found") || lower.contains("does not exist") || lower.contains("no tunnel") {
+                // Tunnel unknown but zone is reachable — cert covers this domain ✓
                 Ok(DomainAuthResult {
                     ok: true,
+                    certain: true,
                     detail: format!("Domain '{}' is accessible with this cert.", domain),
                 })
-            // zone / auth errors → wrong account
             } else if lower.contains("zone") || lower.contains("unauthorized")
-                   || lower.contains("forbidden") || lower.contains("invalid") {
+                   || lower.contains("forbidden") || lower.contains("invalid")
+            {
+                // Zone/auth error — cert is for a different account ✗
                 Ok(DomainAuthResult {
                     ok: false,
+                    certain: true,
                     detail: format!(
-                        "This cert doesn't cover '{}'. You may have authorized the wrong Cloudflare account.",
+                        "This cert doesn't cover '{}'. You likely authorized the wrong Cloudflare account.",
                         domain
                     ),
                 })
             } else {
-                // Unknown error — surface it but don't block the user
+                // Unknown error — inconclusive, let user decide
                 Ok(DomainAuthResult {
-                    ok: false,
-                    detail: format!("Could not verify domain: {}", e),
+                    ok: true,
+                    certain: false,
+                    detail: format!("Could not verify ({}). You can continue — a deploy will confirm access.", e),
                 })
             }
         }
@@ -210,6 +224,7 @@ pub async fn verify_domain_auth(
 #[derive(serde::Serialize)]
 pub struct DomainAuthResult {
     pub ok: bool,
+    pub certain: bool, // false = inconclusive (timeout / unknown error)
     pub detail: String,
 }
 

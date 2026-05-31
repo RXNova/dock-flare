@@ -9,7 +9,7 @@
   let apiToken     = $state('');
   let accountId    = $state('');
   let cancelled    = $state(false);
-  let domainCheck  = $state<{ ok: boolean; detail: string } | null>(null);
+  let domainCheck  = $state<{ ok: boolean; certain: boolean; detail: string } | null>(null);
 
   // Sync when project changes; verify per-project cert on disk
   $effect(() => {
@@ -222,7 +222,7 @@
                 <span class="loading loading-spinner loading-xs"></span>
                 Verifying access to <span class="font-mono">{project.domain}</span>…
               </div>
-            {:else if domainCheck.ok}
+            {:else if domainCheck.ok && domainCheck.certain}
               <div class="flex items-center gap-2 rounded-lg bg-emerald-400/8 border border-emerald-400/20 px-3 py-2">
                 <svg class="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
                   <path fill-rule="evenodd" clip-rule="evenodd"
@@ -231,6 +231,18 @@
                        12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z"/>
                 </svg>
                 <span class="text-xs text-emerald-400">Cert covers <span class="font-mono font-medium">{project.domain}</span></span>
+              </div>
+            {:else if domainCheck.ok && !domainCheck.certain}
+              <!-- Inconclusive (timeout / unknown) — warn but don't block -->
+              <div class="flex items-center gap-2 rounded-lg bg-base-300/50 border border-base-300 px-3 py-2">
+                <svg class="w-3.5 h-3.5 text-base-content/30 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                  <path fill-rule="evenodd" clip-rule="evenodd"
+                    d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25
+                       17.385 2.25 12zm8.706-1.442c1.146-.573 2.437.463 2.126 1.706l-.709 2.836.042-.02a.75.75
+                       0 01.67 1.34l-.04.022c-1.147.573-2.438-.463-2.127-1.706l.71-2.836-.042.02a.75.75 0
+                       11-.671-1.34l.041-.022zM12 9a.75.75 0 100-1.5.75.75 0 000 1.5z"/>
+                </svg>
+                <span class="text-[11px] text-base-content/40">{domainCheck.detail}</span>
               </div>
             {:else}
               <div class="rounded-lg bg-amber-400/8 border border-amber-400/25 px-3 py-2.5 space-y-1.5">
@@ -254,10 +266,11 @@
             {/if}
 
             <div class="flex justify-end">
+              <!-- Block Continue only when we're CERTAIN the domain is wrong -->
               <button class="btn btn-primary btn-sm" onclick={save}
-                      disabled={saving || domainCheck === null || !domainCheck.ok}>
+                      disabled={saving || domainCheck === null || (domainCheck.certain && !domainCheck.ok)}>
                 {#if saving}<span class="loading loading-spinner loading-xs"></span>{/if}
-                Continue
+                {domainCheck === null ? 'Verifying…' : 'Continue'}
               </button>
             </div>
 
