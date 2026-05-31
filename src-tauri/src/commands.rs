@@ -118,6 +118,7 @@ pub async fn list_project_tunnels(
 pub async fn deploy_tunnel(
     app: AppHandle,
     state: tauri::State<'_, DeployLock>,
+    client_state: tauri::State<'_, AppClient>,
     project: Project,
     tunnel: TunnelConfig,
 ) -> Result<(), String> {
@@ -148,6 +149,18 @@ pub async fn deploy_tunnel(
         });
     }
     config::save(&app, &projects);
+
+    // Best-effort health check — never fails the deploy
+    let hostname = tunnel.public_hostname.clone();
+    let app_hc = app.clone();
+    let client_hc = client_state.0.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        match client_hc.head(format!("https://{}", hostname)).send().await {
+            Ok(r) => orchestrate::emit(&app_hc, &format!("  -> Health check: reachable (HTTP {})", r.status().as_u16())),
+            Err(_) => orchestrate::emit(&app_hc, "  -> Health check: not yet reachable — DNS may take a few seconds"),
+        }
+    });
 
     Ok(())
 }
