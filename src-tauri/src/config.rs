@@ -48,7 +48,10 @@ pub struct TunnelConfig {
 fn config_path(app: &tauri::AppHandle) -> PathBuf {
     app.path()
         .app_data_dir()
-        .expect("no app data dir")
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
+                .join(".dock-flare")
+        })
         .join("projects.json")
 }
 
