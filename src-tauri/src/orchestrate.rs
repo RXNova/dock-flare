@@ -99,6 +99,27 @@ pub async fn run_streamed(app: &AppHandle, prog: &str, args: &[&str]) -> Result<
     }
 }
 
+fn spawn_crash_monitor(app: AppHandle, pid: u32) {
+    tokio::spawn(async move {
+        for _ in 0..5760u32 {
+            tokio::time::sleep(Duration::from_secs(15)).await;
+            let alive = tokio::process::Command::new("kill")
+                .args(["-0", &pid.to_string()])
+                .output()
+                .await
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if !alive {
+                emit(&app, &format!(
+                    "WARNING: local cloudflared (pid {}) has exited unexpectedly — tunnel is no longer active",
+                    pid
+                ));
+                break;
+            }
+        }
+    });
+}
+
 // ── Token-auth deploy — returns (tunnel_id, local_pid) ───────────────────────
 
 pub async fn deploy_token(
@@ -226,6 +247,7 @@ pub async fn deploy_token(
             while let Ok(Some(l)) = lines.next_line().await { emit(&a2, &format!("[local] {}", l)); }
         });
         emit(app, "  -> Local cloudflared is now routing traffic");
+        if let Some(p) = pid { spawn_crash_monitor(app.clone(), p); }
         pid
     } else {
         emit(app, "[7/7] Deploying cloudflared via Helm...");
@@ -345,6 +367,7 @@ pub async fn deploy_browser(
             while let Ok(Some(l)) = lines.next_line().await { emit(&a2, &format!("[local] {}", l)); }
         });
         emit(app, "  -> Local cloudflared is now routing traffic");
+        if let Some(p) = pid { spawn_crash_monitor(app.clone(), p); }
         pid
     } else {
         emit(app, "[5/6] Generating K8s manifests...");
