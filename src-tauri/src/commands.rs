@@ -20,6 +20,7 @@ pub struct TunnelInfo {
     pub hostname: Option<String>,
     pub service: Option<String>,
     pub namespace: Option<String>,
+    pub target_type: Option<String>,
 }
 
 // ── Project CRUD ──────────────────────────────────────────────────────────────
@@ -83,23 +84,30 @@ pub async fn list_project_tunnels(
         Ok(cf_tunnels.into_iter().map(|ct| {
             let meta = local.iter().find(|m| m.id == ct.id || m.name == ct.name);
             TunnelInfo {
-                id:       ct.id,
-                name:     ct.name,
-                status:   ct.status,
-                hostname: meta.map(|m| m.hostname.clone()),
-                service:  meta.map(|m| m.service.clone()),
-                namespace:meta.map(|m| m.namespace.clone()),
+                id:          ct.id,
+                name:        ct.name,
+                status:      ct.status,
+                hostname:    meta.map(|m| m.hostname.clone()),
+                service:     meta.map(|m| m.service.clone()),
+                namespace:   meta.map(|m| m.namespace.clone()),
+                target_type: meta.map(|m| match m.target_type {
+                    TargetType::Local => "local".to_string(),
+                    TargetType::K8s  => "k8s".to_string(),
+                }),
             }
         }).collect())
     } else {
-        // Browser mode: show locally tracked tunnels only
-        Ok(local.into_iter().map(|m| TunnelInfo {
-            id:       m.id,
-            name:     m.name,
-            status:   "unknown".to_string(),
-            hostname: Some(m.hostname),
-            service:  Some(m.service),
-            namespace:Some(m.namespace),
+        Ok(local.into_iter().map(|m| {
+            let tt = match m.target_type { TargetType::Local => "local", TargetType::K8s => "k8s" }.to_string();
+            TunnelInfo {
+                id:          m.id,
+                name:        m.name,
+                status:      "unknown".to_string(),
+                hostname:    Some(m.hostname),
+                service:     Some(m.service),
+                namespace:   Some(m.namespace),
+                target_type: Some(tt),
+            }
         }).collect())
     }
 }

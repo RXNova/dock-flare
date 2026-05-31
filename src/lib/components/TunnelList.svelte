@@ -106,7 +106,7 @@
     <!-- Table header -->
     <div class="flex items-center gap-3 px-4 py-2 border-b border-base-300 bg-base-300/30">
       <span class="w-2 flex-shrink-0"></span>
-      <span class="text-[10px] font-semibold uppercase tracking-widest text-base-content/30 w-36">Name</span>
+      <span class="text-[10px] font-semibold uppercase tracking-widest text-base-content/30 w-36">Name / Type</span>
       <span class="text-[10px] font-semibold uppercase tracking-widest text-base-content/30 flex-1">Hostname</span>
       <span class="text-[10px] font-semibold uppercase tracking-widest text-base-content/30 w-36 hidden xl:block">Service</span>
       <span class="text-[10px] font-semibold uppercase tracking-widest text-base-content/30 w-20">Namespace</span>

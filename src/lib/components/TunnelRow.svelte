@@ -44,8 +44,15 @@
   <!-- Status dot -->
   <span class="w-2 h-2 rounded-full flex-shrink-0 {dot}"></span>
 
-  <!-- Name -->
-  <span class="text-xs font-medium w-36 truncate">{tunnel.name}</span>
+  <!-- Name + type badge -->
+  <div class="flex items-center gap-1.5 w-36 min-w-0">
+    <span class="text-xs font-medium truncate">{tunnel.name}</span>
+    {#if tunnel.target_type}
+      <span class="badge badge-sm flex-shrink-0 {tunnel.target_type === 'local' ? 'badge-info' : 'badge-warning'} opacity-70">
+        {tunnel.target_type}
+      </span>
+    {/if}
+  </div>
 
   <!-- Hostname -->
   <span class="text-xs text-base-content/50 flex-1 truncate font-mono">

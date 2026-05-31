@@ -20,6 +20,7 @@ export interface TunnelInfo {
   hostname: string | null;
   service: string | null;
   namespace: string | null;
+  target_type: string | null;
 }
 
 export interface TunnelConfig {
