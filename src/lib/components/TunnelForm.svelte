@@ -3,6 +3,7 @@
   import { api } from '$lib/api';
   import { domainError } from '$lib/utils';
   import type { TunnelConfig } from '$lib/types';
+  import { Zap } from '@lucide/svelte';
 
   let { onSuccess, onCancel }: { onSuccess: () => void; onCancel: () => void } = $props();
 
@@ -155,12 +156,7 @@
           <span class="loading loading-spinner loading-xs"></span>
           Deploying…
         {:else}
-          <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-            <path fill-rule="evenodd" clip-rule="evenodd"
-              d="M14.615 1.595a.75.75 0 01.359.852L12.982 9.75h7.268a.75.75 0 01.548 1.262l-10.5
-                 11.25a.75.75 0 01-1.272-.71l1.992-7.302H3.75a.75.75 0 01-.548-1.262l10.5-11.25a.75.75
-                 0 01.913-.143z"/>
-          </svg>
+          <Zap class="w-3.5 h-3.5" strokeWidth={2} />
           Deploy Tunnel
         {/if}
       </button>

@@ -3,6 +3,7 @@
   import { api } from '$lib/api';
   import TunnelRow from './TunnelRow.svelte';
   import TunnelForm from './TunnelForm.svelte';
+  import { RefreshCw, Plus } from '@lucide/svelte';
 
   let project    = $derived(store.selectedProject!);
   let showForm   = $state(false);
@@ -77,14 +78,7 @@
         {#if store.tunnelsLoading}
           <span class="loading loading-spinner loading-xs"></span>
         {:else}
-          <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-            <path fill-rule="evenodd" clip-rule="evenodd"
-              d="M4.755 10.059a7.5 7.5 0 0112.548-3.364l1.903 1.927H15a.75.75 0 000 1.5h4.5a.75.75
-                 0 00.75-.75V4.5a.75.75 0 00-1.5 0v3.093L17.53 5.887a9 9 0 00-15.044 4.034.75.75 0
-                 001.269.138zM19.245 13.941a.75.75 0 00-1.269-.138A7.5 7.5 0 016.427 17.167l-1.903-1.927H9a.75.75
-                 0 000-1.5H4.5a.75.75 0 00-.75.75v4.5a.75.75 0 001.5 0v-3.093l1.72 1.706a9 9 0 0015.044-4.034.75.75
-                 0 00-1.769-.438z"/>
-          </svg>
+          <RefreshCw class="w-3.5 h-3.5" strokeWidth={2} />
         {/if}
         Refresh
       </button>
@@ -97,11 +91,7 @@
         {#if showForm}
           Cancel
         {:else}
-          <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-            <path fill-rule="evenodd" clip-rule="evenodd"
-              d="M12 3.75a.75.75 0 01.75.75v6.75h6.75a.75.75 0 010 1.5h-6.75v6.75a.75.75 0 01-1.5
-                 0v-6.75H4.5a.75.75 0 010-1.5h6.75V4.5a.75.75 0 01.75-.75z"/>
-          </svg>
+          <Plus class="w-3.5 h-3.5" strokeWidth={2} />
           Add Tunnel
         {/if}
       </button>
@@ -138,11 +128,7 @@
           class="btn btn-ghost btn-xs text-base-content/40 gap-1"
           onclick={() => (showForm = true)}
         >
-          <svg class="w-3 h-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-            <path fill-rule="evenodd" clip-rule="evenodd"
-              d="M12 3.75a.75.75 0 01.75.75v6.75h6.75a.75.75 0 010 1.5h-6.75v6.75a.75.75 0 01-1.5
-                 0v-6.75H4.5a.75.75 0 010-1.5h6.75V4.5a.75.75 0 01.75-.75z"/>
-          </svg>
+          <Plus class="w-3 h-3" strokeWidth={2} />
           Add your first tunnel
         </button>
       </div>
