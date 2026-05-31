@@ -1,0 +1,346 @@
+use base64::{engine::general_purpose::STANDARD, Engine};
+use rand::RngCore;
+use reqwest::Client;
+use std::process::Stdio;
+use tauri::{AppHandle, Emitter};
+use tokio::io::{AsyncBufReadExt, BufReader};
+
+use crate::cloudflare;
+use crate::config::{Project, TunnelConfig};
+
+pub fn emit(app: &AppHandle, msg: &str) {
+    let _ = app.emit("log", msg.to_string());
+}
+
+fn cf_home() -> std::path::PathBuf {
+    std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cloudflared")
+}
+
+pub async fn check_bin(name: &str) -> Result<(), String> {
+    let ok = tokio::process::Command::new("which")
+        .arg(name)
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if ok { Ok(()) } else { Err(format!("'{}' not found in PATH", name)) }
+}
+
+pub async fn run_silent(prog: &str, args: &[&str]) -> Result<String, String> {
+    let out = tokio::process::Command::new(prog)
+        .args(args)
+        .output()
+        .await
+        .map_err(|e| format!("exec '{}': {}", prog, e))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+pub async fn run_streamed(app: &AppHandle, prog: &str, args: &[&str]) -> Result<(), String> {
+    let mut child = tokio::process::Command::new(prog)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("spawn '{}': {}", prog, e))?;
+
+    let stdout = BufReader::new(child.stdout.take().unwrap());
+    let stderr = BufReader::new(child.stderr.take().unwrap());
+    let a1 = app.clone();
+    let a2 = app.clone();
+    let t1 = tokio::spawn(async move {
+        let mut lines = stdout.lines();
+        while let Ok(Some(l)) = lines.next_line().await { emit(&a1, &l); }
+    });
+    let t2 = tokio::spawn(async move {
+        let mut lines = stderr.lines();
+        while let Ok(Some(l)) = lines.next_line().await { emit(&a2, &l); }
+    });
+    let status = child.wait().await.map_err(|e| e.to_string())?;
+    let _ = tokio::join!(t1, t2);
+    if status.success() { Ok(()) } else { Err(format!("'{}' exited non-zero", prog)) }
+}
+
+// ── Token-auth deploy — returns tunnel_id on success ─────────────────────────
+
+pub async fn deploy_token(
+    app: &AppHandle,
+    project: &Project,
+    tunnel: &TunnelConfig,
+) -> Result<String, String> {
+    let client = Client::new();
+
+    emit(app, "[1/6] Checking prerequisites...");
+    for bin in &["kubectl", "helm"] {
+        check_bin(bin).await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
+    }
+    let zone = cloudflare::extract_zone(&tunnel.public_hostname);
+    emit(app, &format!("  -> Verifying zone '{}'...", zone));
+    let zone_id = cloudflare::get_zone_id(&client, &project.api_token, &project.account_id, &zone)
+        .await
+        .map_err(|_| {
+            let msg = format!(
+                "'{}' not found in your Cloudflare account. Check the token has DNS access to this zone.",
+                tunnel.public_hostname
+            );
+            emit(app, &format!("ERROR: {}", msg));
+            msg
+        })?;
+
+    emit(app, "  -> Checking for duplicate tunnel name...");
+    if let Ok(Some(id)) = cloudflare::find_tunnel_id(
+        &client, &project.api_token, &project.account_id, &tunnel.tunnel_name,
+    ).await {
+        let msg = format!(
+            "Tunnel '{}' (id: {}…) already exists — tear it down first or use a different name.",
+            tunnel.tunnel_name, &id[..id.len().min(8)]
+        );
+        emit(app, &format!("ERROR: {}", msg));
+        return Err(msg);
+    }
+
+    let mut secret_bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut secret_bytes);
+    let secret = STANDARD.encode(secret_bytes);
+
+    emit(app, "[2/6] Creating Cloudflare tunnel...");
+    let tunnel_id = cloudflare::create_tunnel(
+        &client, &project.api_token, &project.account_id, &tunnel.tunnel_name, &secret,
+    ).await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
+    emit(app, &format!("  -> Tunnel ID: {}", tunnel_id));
+
+    emit(app, "[3/6] Fetching tunnel token...");
+    let token = cloudflare::get_tunnel_token(
+        &client, &project.api_token, &project.account_id, &tunnel_id,
+    ).await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
+    emit(app, "  -> Token acquired");
+
+    emit(app, "[4/6] Configuring ingress rules...");
+    cloudflare::configure_ingress(
+        &client, &project.api_token, &project.account_id, &tunnel_id,
+        &tunnel.public_hostname, &tunnel.internal_service,
+    ).await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
+    emit(app, &format!("  -> {} -> {}", tunnel.public_hostname, tunnel.internal_service));
+
+    emit(app, "[5/6] Creating DNS CNAME...");
+    cloudflare::create_dns_cname(
+        &client, &project.api_token, &zone_id, &tunnel.public_hostname, &tunnel_id,
+    ).await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
+    emit(app, &format!("  -> {} → {}.cfargotunnel.com", tunnel.public_hostname, tunnel_id));
+
+    emit(app, "[6/6] Deploying cloudflared via Helm...");
+    run_silent("helm", &["repo", "add", "cloudflare", "https://cloudflare.github.io/helm-charts"])
+        .await.ok();
+    run_silent("helm", &["repo", "update"])
+        .await.map_err(|e| { emit(app, &format!("ERROR: helm repo update: {}", e)); e })?;
+    run_streamed(app, "helm", &[
+        "upgrade", "--install", "cloudflared", "cloudflare/cloudflare-tunnel",
+        "--namespace", &tunnel.k8s_namespace, "--create-namespace",
+        "--set", &format!("cloudflare.tunnelToken={}", token),
+    ]).await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
+    emit(app, "  -> Helm chart deployed");
+
+    Ok(tunnel_id)
+}
+
+// ── Browser-auth deploy ───────────────────────────────────────────────────────
+
+pub async fn deploy_browser(
+    app: &AppHandle,
+    tunnel: &TunnelConfig,
+) -> Result<String, String> {
+    emit(app, "[1/5] Checking prerequisites...");
+    for bin in &["cloudflared", "kubectl"] {
+        check_bin(bin).await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
+    }
+    if !cf_home().join("cert.pem").exists() {
+        let msg = "Not authorized — authenticate this project first";
+        emit(app, &format!("ERROR: {}", msg));
+        return Err(msg.to_string());
+    }
+    emit(app, "  -> Prerequisites OK");
+
+    emit(app, "[2/5] Creating tunnel...");
+    let out = run_silent("cloudflared", &["tunnel", "create", &tunnel.tunnel_name])
+        .await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
+    let tunnel_id = out.lines()
+        .find(|l| l.contains("with id "))
+        .and_then(|l| l.split("with id ").nth(1))
+        .map(|s| s.trim().to_string())
+        .ok_or_else(|| "Could not parse tunnel ID from cloudflared output".to_string())?;
+    emit(app, &format!("  -> Tunnel ID: {}", tunnel_id));
+
+    emit(app, "[3/5] Routing DNS...");
+    if let Err(e) = run_streamed(app, "cloudflared",
+        &["tunnel", "route", "dns", &tunnel.tunnel_name, &tunnel.public_hostname]).await
+    {
+        emit(app, &format!("ERROR: {}", e));
+        emit(app, "  -> Cleaning up orphaned tunnel...");
+        run_silent("cloudflared", &["tunnel", "delete", "-f", &tunnel.tunnel_name]).await.ok();
+        return Err(format!(
+            "DNS routing failed for '{}'. Tunnel deleted. Make sure the hostname belongs to an authorized zone.",
+            tunnel.public_hostname
+        ));
+    }
+
+    emit(app, "[4/5] Generating K8s manifests...");
+    let creds_path = cf_home().join(format!("{}.json", tunnel_id));
+    let creds_b64 = STANDARD.encode(
+        std::fs::read(&creds_path)
+            .map_err(|e| format!("Cannot read credentials {}: {}", creds_path.display(), e))?,
+    );
+    let manifest = build_manifest(
+        &tunnel.k8s_namespace, &tunnel_id,
+        &tunnel.public_hostname, &tunnel.internal_service, &creds_b64,
+    );
+    let manifest_path = std::env::temp_dir().join("cloudflared-manifest.yaml");
+    std::fs::write(&manifest_path, &manifest).map_err(|e| format!("write manifest: {}", e))?;
+    emit(app, &format!("  -> Manifest written to {}", manifest_path.display()));
+
+    emit(app, "[5/5] Applying K8s manifests...");
+    run_streamed(app, "kubectl", &["apply", "-f", manifest_path.to_str().unwrap()])
+        .await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
+
+    Ok(tunnel_id)
+}
+
+fn build_manifest(ns: &str, tunnel_id: &str, domain: &str, service: &str, creds_b64: &str) -> String {
+    format!(
+        r#"---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {ns}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflared-config
+  namespace: {ns}
+data:
+  config.yaml: |
+    tunnel: {tunnel_id}
+    credentials-file: /etc/cloudflared/creds/credentials.json
+    no-autoupdate: true
+    ingress:
+      - hostname: {domain}
+        service: {service}
+      - service: http_status:404
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloudflared-creds
+  namespace: {ns}
+type: Opaque
+data:
+  credentials.json: {creds_b64}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: {ns}
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cloudflared
+  template:
+    metadata:
+      labels:
+        app: cloudflared
+    spec:
+      containers:
+      - name: cloudflared
+        image: cloudflare/cloudflared:latest
+        args: ["tunnel", "--config", "/etc/cloudflared/config/config.yaml", "run"]
+        volumeMounts:
+        - name: config
+          mountPath: /etc/cloudflared/config
+          readOnly: true
+        - name: creds
+          mountPath: /etc/cloudflared/creds
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: cloudflared-config
+      - name: creds
+        secret:
+          secretName: cloudflared-creds
+"#,
+        ns = ns, tunnel_id = tunnel_id, domain = domain, service = service, creds_b64 = creds_b64,
+    )
+}
+
+// ── Token-auth teardown ───────────────────────────────────────────────────────
+
+pub async fn teardown_token(
+    app: &AppHandle,
+    project: &Project,
+    tunnel_name: &str,
+    hostname: &str,
+    namespace: &str,
+) -> Result<(), String> {
+    let client = Client::new();
+
+    emit(app, "[1/4] Finding tunnel...");
+    let tunnel_id = cloudflare::find_tunnel_id(
+        &client, &project.api_token, &project.account_id, tunnel_name,
+    ).await?
+    .ok_or_else(|| {
+        let msg = format!("No active tunnel named '{}'", tunnel_name);
+        emit(app, &format!("ERROR: {}", msg));
+        msg
+    })?;
+    emit(app, &format!("  -> Tunnel ID: {}", tunnel_id));
+
+    emit(app, "[2/4] Removing K8s deployment...");
+    if run_streamed(app, "helm", &["uninstall", "cloudflared", "--namespace", namespace]).await.is_ok() {
+        emit(app, "  -> Helm release removed");
+    } else {
+        run_streamed(app, "kubectl", &["delete", "namespace", namespace, "--ignore-not-found"])
+            .await.ok();
+        emit(app, "  -> kubectl namespace deleted");
+    }
+
+    emit(app, "[3/4] Deleting DNS record...");
+    let zone = cloudflare::extract_zone(hostname);
+    if let Ok(zone_id) = cloudflare::get_zone_id(&client, &project.api_token, &project.account_id, &zone).await {
+        match cloudflare::delete_dns_cname(&client, &project.api_token, &zone_id, hostname).await {
+            Ok(()) => emit(app, &format!("  -> DNS record for '{}' deleted", hostname)),
+            Err(e) => emit(app, &format!("  -> DNS warning: {} (continuing)", e)),
+        }
+    }
+
+    emit(app, "[4/4] Deleting Cloudflare tunnel...");
+    cloudflare::delete_tunnel(&client, &project.api_token, &project.account_id, &tunnel_id)
+        .await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
+    emit(app, "  -> Tunnel deleted");
+
+    Ok(())
+}
+
+// ── Browser-auth teardown ─────────────────────────────────────────────────────
+
+pub async fn teardown_browser(
+    app: &AppHandle,
+    tunnel_name: &str,
+    namespace: &str,
+) -> Result<(), String> {
+    emit(app, "[1/2] Removing K8s deployment...");
+    run_streamed(app, "kubectl", &["delete", "namespace", namespace, "--ignore-not-found"])
+        .await.ok();
+    emit(app, "  -> Namespace removed");
+
+    emit(app, "[2/2] Deleting cloudflared tunnel...");
+    run_streamed(app, "cloudflared", &["tunnel", "delete", "-f", tunnel_name])
+        .await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
+    emit(app, "  -> Tunnel deleted");
+
+    Ok(())
+}
