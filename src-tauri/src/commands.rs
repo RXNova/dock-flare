@@ -348,6 +348,46 @@ pub async fn cloudflared_login(app: AppHandle, project_id: String) -> Result<(),
 }
 
 #[tauri::command]
+pub async fn update_tunnel_service(
+    app: AppHandle,
+    client_state: tauri::State<'_, AppClient>,
+    project: Project,
+    tunnel_name: String,
+    new_service: String,
+) -> Result<(), String> {
+    let client = &client_state.0;
+
+    // Look up tunnel_id from stored metadata
+    let tunnel_id = config::load(&app)
+        .into_iter()
+        .find(|p| p.id == project.id)
+        .and_then(|p| p.tunnels.into_iter().find(|t| t.name == tunnel_name))
+        .map(|m| m.id)
+        .ok_or_else(|| format!("Tunnel '{}' not found in local metadata", tunnel_name))?;
+
+    // Update ingress config on Cloudflare
+    let hostname = config::load(&app)
+        .into_iter()
+        .find(|p| p.id == project.id)
+        .and_then(|p| p.tunnels.into_iter().find(|t| t.id == tunnel_id))
+        .map(|m| m.hostname)
+        .unwrap_or_default();
+
+    cloudflare::configure_ingress(client, &project.api_token, &project.account_id,
+        &tunnel_id, &hostname, &new_service).await?;
+
+    // Update stored metadata
+    let mut projects = config::load(&app);
+    if let Some(p) = projects.iter_mut().find(|p| p.id == project.id) {
+        if let Some(t) = p.tunnels.iter_mut().find(|t| t.name == tunnel_name) {
+            t.service = new_service;
+        }
+    }
+    config::save(&app, &projects);
+    Ok(())
+}
+
+#[tauri::command]
 pub fn get_log_file_path() -> String {
     orchestrate::log_file_path().to_string_lossy().to_string()
 }

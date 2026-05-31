@@ -25,6 +25,7 @@ export const api = {
   cancelLogin:        ()                   => invoke<void>('cancel_login'),
   installCloudflared: ()                   => invoke<void>('install_cloudflared'),
   openUrl:            (url: string)        => invoke<void>('open_url', { url }),
-  getLogFilePath:     ()                   => invoke<string>('get_log_file_path'),
-  clearPersistentLogs: ()                  => invoke<void>('clear_persistent_logs'),
+  getLogFilePath:      ()                                                          => invoke<string>('get_log_file_path'),
+  clearPersistentLogs: ()                                                          => invoke<void>('clear_persistent_logs'),
+  updateTunnelService: (p: Project, tunnelName: string, newService: string)        => invoke<void>('update_tunnel_service', { project: p, tunnelName, newService }),
 };

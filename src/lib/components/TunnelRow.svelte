@@ -7,6 +7,21 @@
 
   let confirming     = $state(false);
   let pendingNs      = $state('');
+  let editing        = $state(false);
+  let editService    = $state('');
+
+  $effect(() => { if (editing) editService = tunnel.service ?? ''; });
+
+  async function saveEdit() {
+    const project = store.selectedProject!;
+    try {
+      await api.updateTunnelService(project, tunnel.name, editService);
+      editing = false;
+      store.tunnels = await api.listProjectTunnels(project);
+    } catch (e) {
+      store.appendLog(`Edit failed: ${e}`);
+    }
+  }
 
   // Pre-fill namespace when confirm opens
   $effect(() => {
@@ -59,10 +74,20 @@
     {tunnel.hostname ?? '—'}
   </span>
 
-  <!-- Service -->
-  <span class="text-xs text-base-content/40 w-36 truncate font-mono hidden xl:block">
-    {tunnel.service ?? '—'}
-  </span>
+  <!-- Service (editable) -->
+  {#if editing}
+    <div class="flex items-center gap-1 w-36 hidden xl:flex">
+      <input type="text" bind:value={editService}
+        class="input input-xs w-full bg-base-100 border-base-300 font-mono text-[10px]
+               focus:outline-none focus:ring-1 focus:ring-primary/30" />
+      <button class="btn btn-xs btn-primary px-1.5" onclick={saveEdit}>✓</button>
+      <button class="btn btn-ghost btn-xs px-1" onclick={() => (editing = false)}>✕</button>
+    </div>
+  {:else}
+    <span class="text-xs text-base-content/40 w-36 truncate font-mono hidden xl:block">
+      {tunnel.service ?? '—'}
+    </span>
+  {/if}
 
   <!-- Namespace -->
   <span class="text-[10px] text-base-content/30 font-mono w-20 truncate">
@@ -103,6 +128,22 @@
         disabled={store.busy}
       >✕</button>
     {:else}
+      <!-- Edit service button (xl only, token mode) -->
+      {#if store.selectedProject?.auth_mode === 'token'}
+        <button
+          class="btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity
+                 text-base-content/40 hover:text-primary hover:bg-primary/10 hidden xl:flex"
+          onclick={() => (editing = true)}
+          disabled={store.busy}
+          title="Edit internal service URL"
+        >
+          <svg class="w-3 h-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M21.731 2.269a2.625 2.625 0 00-3.712 0l-1.157 1.157 3.712 3.712 1.157-1.157a2.625
+                     2.625 0 000-3.712zM19.513 8.199l-3.712-3.712-8.4 8.4a5.25 5.25 0 00-1.32 2.214l-.8
+                     2.685a.75.75 0 00.933.933l2.685-.8a5.25 5.25 0 002.214-1.32l8.4-8.4z"/>
+          </svg>
+        </button>
+      {/if}
       <button
         class="btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity
                text-base-content/40 hover:text-red-400 hover:bg-red-400/10 gap-1"
