@@ -87,9 +87,16 @@ pub async fn run_streamed(app: &AppHandle, prog: &str, args: &[&str]) -> Result<
         let mut lines = stderr.lines();
         while let Ok(Some(l)) = lines.next_line().await { emit(&a2, &l); }
     });
-    let status = child.wait().await.map_err(|e| e.to_string())?;
+    let prog_name = prog.to_string();
+    let wait_result = tokio::time::timeout(Duration::from_secs(300), child.wait()).await;
     let _ = tokio::join!(t1, t2);
-    if status.success() { Ok(()) } else { Err(format!("'{}' exited non-zero", prog)) }
+    match wait_result {
+        Err(_) => Err(format!("'{}' timed out after 5 minutes", prog_name)),
+        Ok(Err(e)) => Err(e.to_string()),
+        Ok(Ok(status)) => {
+            if status.success() { Ok(()) } else { Err(format!("'{}' exited non-zero", prog_name)) }
+        }
+    }
 }
 
 // ── Token-auth deploy — returns (tunnel_id, local_pid) ───────────────────────
