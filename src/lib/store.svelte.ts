@@ -15,8 +15,9 @@ class AppStore {
   }
 
   // ── Tunnels for selected project ──────────────────────────
-  tunnels        = $state<TunnelInfo[]>([]);
-  tunnelsLoading = $state(false);
+  tunnels          = $state<TunnelInfo[]>([]);
+  tunnelsLoading   = $state(false);
+  tunnelsCacheTs   = $state<number>(0);
 
   // ── cloudflared binary check (global, not per-project) ───────
   cloudflaredFound = $state<boolean | null>(null);

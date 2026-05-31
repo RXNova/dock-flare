@@ -7,10 +7,12 @@
   let project    = $derived(store.selectedProject!);
   let showForm   = $state(false);
 
-  async function refresh() {
+  async function refresh(force = false) {
+    if (!force && Date.now() - store.tunnelsCacheTs < 30_000 && store.tunnels.length > 0) return;
     store.tunnelsLoading = true;
     try {
       store.tunnels = await api.listProjectTunnels(project);
+      store.tunnelsCacheTs = Date.now();
     } catch (e) {
       store.appendLog(`Error listing tunnels: ${e}`);
     } finally {
@@ -18,10 +20,10 @@
     }
   }
 
-  // Refresh whenever the selected project changes
+  // Refresh whenever the selected project changes; reset cache on project switch
   $effect(() => {
     const id = store.selectedId;
-    if (id) refresh();
+    if (id) { store.tunnelsCacheTs = 0; refresh(); }
   });
 
   const authBadge = $derived(
@@ -59,7 +61,7 @@
       <!-- Refresh -->
       <button
         class="btn btn-ghost btn-sm gap-1.5 text-base-content/40"
-        onclick={refresh}
+        onclick={() => refresh(true)}
         disabled={store.busy || store.tunnelsLoading}
       >
         {#if store.tunnelsLoading}
