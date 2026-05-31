@@ -8,6 +8,7 @@
   let authMode     = $state<'token' | 'browser'>('token');
   let apiToken     = $state('');
   let accountId    = $state('');
+  let cancelled    = $state(false); // distinguish cancel from error
 
   // Sync when project changes; verify per-project cert on disk
   $effect(() => {
@@ -31,6 +32,7 @@
   }
 
   async function authorize() {
+    cancelled = false;
     store.status = 'processing';
     store.clearLogs();
     try {
@@ -41,9 +43,20 @@
       await api.upsertProject(updated);
       store.upsertProject(updated);
     } catch (e) {
-      store.status = 'failed';
-      store.appendLog(`FATAL: ${e}`);
+      if (cancelled) {
+        store.status = 'idle'; // user chose to cancel — not an error
+      } else {
+        store.status = 'failed';
+        store.appendLog(`FATAL: ${e}`);
+      }
     }
+  }
+
+  async function cancelLogin() {
+    cancelled = true;
+    await api.cancelLogin();
+    store.status = 'idle';
+    store.clearLogs();
   }
 
   async function installCloudflared() {
@@ -80,12 +93,11 @@
           Set up authentication to manage tunnels for this domain.
         </p>
       </div>
-      <!-- Cancel / deselect -->
+      <!-- Cancel / deselect — always clickable, even during auth -->
       <button
         class="btn btn-ghost btn-xs text-base-content/30 hover:text-base-content/60 mt-0.5"
-        onclick={cancel}
-        disabled={store.busy}
-      >✕ Cancel</button>
+        onclick={store.busy ? cancelLogin : cancel}
+      >✕ {store.busy ? 'Stop' : 'Cancel'}</button>
     </div>
 
     <!-- Auth card -->
@@ -164,13 +176,19 @@
 
           {:else if store.busy}
             <!-- Authorization in progress -->
-            <div class="rounded-lg bg-base-300/50 border border-amber-400/20 px-3 py-3 space-y-2">
-              <div class="flex items-center gap-2.5">
-                <span class="loading loading-spinner loading-xs text-amber-400 flex-shrink-0"></span>
-                <span class="text-xs font-medium text-base-content/70">Waiting for browser authorization…</span>
+            <div class="rounded-lg bg-base-300/50 border border-amber-400/20 px-3 py-3 space-y-2.5">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2.5">
+                  <span class="loading loading-spinner loading-xs text-amber-400 flex-shrink-0"></span>
+                  <span class="text-xs font-medium text-base-content/70">Waiting for browser authorization…</span>
+                </div>
+                <button
+                  class="btn btn-ghost btn-xs text-red-400/60 hover:text-red-400"
+                  onclick={cancelLogin}
+                >Cancel login</button>
               </div>
               <p class="text-[11px] text-base-content/40 pl-5">
-                If the browser didn't open, copy the URL from the terminal log below and paste it into your browser.
+                If the browser didn't open, click the URL in the terminal log below to open it.
               </p>
             </div>
 

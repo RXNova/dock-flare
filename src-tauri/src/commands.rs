@@ -153,6 +153,27 @@ pub async fn teardown_tunnel(
 // ── cloudflared helpers ───────────────────────────────────────────────────────
 
 #[tauri::command]
+pub async fn cancel_login(app: AppHandle) -> Result<(), String> {
+    // Kill the cloudflared process that is sitting in "Waiting for login..."
+    tokio::process::Command::new("pkill")
+        .args(["-f", "cloudflared tunnel login"])
+        .output()
+        .await
+        .ok();
+    orchestrate::emit(&app, "Login cancelled.");
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn open_url(url: String) -> Result<(), String> {
+    tokio::process::Command::new("open")
+        .arg(&url)
+        .spawn()
+        .map_err(|e| format!("open: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn check_cloudflared() -> bool {
     orchestrate::check_bin("cloudflared").await.is_ok()
 }

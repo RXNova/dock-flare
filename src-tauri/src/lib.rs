@@ -18,6 +18,8 @@ pub fn run() {
             commands::check_cf_auth,
             commands::install_cloudflared,
             commands::cloudflared_login,
+            commands::cancel_login,
+            commands::open_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
