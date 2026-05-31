@@ -69,10 +69,25 @@
     {/if}
   </div>
 
-  <!-- Hostname -->
-  <span class="text-xs text-base-content/50 flex-1 truncate font-mono">
-    {tunnel.hostname ?? '—'}
-  </span>
+  <!-- Hostname + open button -->
+  <div class="flex items-center gap-1 flex-1 min-w-0">
+    <span class="text-xs text-base-content/50 truncate font-mono">{tunnel.hostname ?? '—'}</span>
+    {#if tunnel.hostname}
+      <button
+        class="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity flex-shrink-0"
+        onclick={() => api.openUrl('https://' + tunnel.hostname)}
+        title="Open in browser"
+      >
+        <svg class="w-3 h-3 text-base-content/50" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+          <path fill-rule="evenodd" clip-rule="evenodd"
+            d="M15.75 2.25H21a.75.75 0 01.75.75v5.25a.75.75 0 01-1.5 0V4.81L8.03 17.03a.75.75 0
+               01-1.06-1.06L19.19 3.75h-3.44a.75.75 0 010-1.5zm-10.5 4.5a1.5 1.5 0 00-1.5 1.5v10.5a1.5
+               1.5 0 001.5 1.5h10.5a1.5 1.5 0 001.5-1.5V10.5a.75.75 0 011.5 0v8.25a3 3 0 01-3 3H5.25a3
+               3 0 01-3-3V8.25a3 3 0 013-3h8.25a.75.75 0 010 1.5H5.25z"/>
+        </svg>
+      </button>
+    {/if}
+  </div>
 
   <!-- Service (editable) -->
   {#if editing}
