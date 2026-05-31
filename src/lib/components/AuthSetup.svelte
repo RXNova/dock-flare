@@ -201,9 +201,13 @@
             </div>
           {/if}
 
+          {#if apiToken && apiToken.length < 20}
+            <p class="text-[11px] text-amber-400">Token looks too short — Cloudflare tokens are usually 40+ characters</p>
+          {/if}
+
           <div class="flex justify-end">
             <button class="btn btn-primary btn-sm" onclick={connectToken}
-                    disabled={!apiToken || !accountId || working}>
+                    disabled={!apiToken || apiToken.length < 20 || !accountId || working}>
               {#if working}<span class="loading loading-spinner loading-xs"></span>{/if}
               Connect
             </button>
