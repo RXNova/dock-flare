@@ -2,6 +2,14 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::Manager;
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TargetType {
+    #[default]
+    Local,
+    K8s,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Project {
     pub id: String,
@@ -33,7 +41,7 @@ pub struct TunnelMeta {
     pub service: String,
     pub namespace: String,
     #[serde(default)]
-    pub target_type: String, // "local" | "k8s"
+    pub target_type: TargetType,
     #[serde(default)]
     pub pid: Option<u32>,
 }
@@ -41,7 +49,9 @@ pub struct TunnelMeta {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TunnelConfig {
     pub tunnel_name: String,
-    pub public_hostname: String,    pub target_type: String,    pub k8s_namespace: String,
+    pub public_hostname: String,
+    pub target_type: TargetType,
+    pub k8s_namespace: String,
     pub internal_service: String,
 }
 

@@ -3,7 +3,7 @@ use tauri::AppHandle;
 use base64::Engine as _;
 
 use crate::cloudflare;
-use crate::config::{self, Project, TunnelConfig};
+use crate::config::{self, Project, TargetType, TunnelConfig};
 use crate::orchestrate;
 
 pub struct DeployLock(pub tokio::sync::Mutex<()>);
@@ -152,7 +152,7 @@ pub async fn teardown_tunnel(
         .find(|p| p.id == project.id)
         .and_then(|p| p.tunnels.into_iter().find(|t| t.name == tunnel_name))
         .map(|m| (m.target_type, m.pid))
-        .unwrap_or_else(|| (String::new(), None));
+        .unwrap_or_else(|| (TargetType::default(), None));
 
     let result = if project.auth_mode == "browser" {
         orchestrate::teardown_browser(&app, &project.id, &tunnel_name, &namespace, &target_type, pid).await

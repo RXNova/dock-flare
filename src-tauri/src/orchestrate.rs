@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::cloudflare;
-use crate::config::{Project, TunnelConfig};
+use crate::config::{Project, TargetType, TunnelConfig};
 
 const CLOUDFLARED_IMAGE: &str = "cloudflare/cloudflared:2025.4.0";
 
@@ -105,12 +105,12 @@ pub async fn deploy_token(
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
     emit(app, "[1/7] Checking prerequisites...");
-    let req_bins = if tunnel.target_type == "local" { vec!["cloudflared"] } else { vec!["kubectl", "helm"] };
+    let req_bins = if tunnel.target_type == TargetType::Local { vec!["cloudflared"] } else { vec!["kubectl", "helm"] };
     for bin in req_bins {
         check_bin(bin).await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
     }
 
-    if tunnel.target_type != "local" {
+    if tunnel.target_type != TargetType::Local {
         emit(app, "[2/7] Checking Kubernetes connectivity...");
         if run_silent("kubectl", &["cluster-info"]).await.is_err() {
             let msg = "Could not connect to Kubernetes cluster. Make sure Docker Desktop, Minikube, orbstack, or another local cluster is running and your KUBECONFIG is correct.";
@@ -185,7 +185,7 @@ pub async fn deploy_token(
     }
     emit(app, &format!("  -> {} → {}.cfargotunnel.com", tunnel.public_hostname, tunnel_id));
 
-    let local_pid: Option<u32> = if tunnel.target_type == "local" {
+    let local_pid: Option<u32> = if tunnel.target_type == TargetType::Local {
         emit(app, "[7/7] Starting local cloudflared process...");
         let a1 = app.clone();
         let a2 = app.clone();
@@ -261,7 +261,7 @@ pub async fn deploy_browser(
         .ok_or_else(|| "Cert path is not valid UTF-8".to_string())?;
 
     emit(app, "[1/6] Checking prerequisites...");
-    let req_bins = if tunnel.target_type == "local" { vec!["cloudflared"] } else { vec!["cloudflared", "kubectl"] };
+    let req_bins = if tunnel.target_type == TargetType::Local { vec!["cloudflared"] } else { vec!["cloudflared", "kubectl"] };
     for bin in req_bins {
         check_bin(bin).await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
     }
@@ -272,7 +272,7 @@ pub async fn deploy_browser(
     }
     emit(app, "  -> Prerequisites OK");
 
-    if tunnel.target_type != "local" {
+    if tunnel.target_type != TargetType::Local {
         emit(app, "[2/6] Checking Kubernetes connectivity...");
         if run_silent("kubectl", &["cluster-info"]).await.is_err() {
             let msg = "Could not connect to Kubernetes cluster. Make sure Docker Desktop, Minikube, orbstack, or another local cluster is running and your KUBECONFIG is correct.";
@@ -306,7 +306,7 @@ pub async fn deploy_browser(
         ));
     }
 
-    let local_pid: Option<u32> = if tunnel.target_type == "local" {
+    let local_pid: Option<u32> = if tunnel.target_type == TargetType::Local {
         emit(app, "[5/6] Starting local cloudflared process...");
         let a1 = app.clone();
         let a2 = app.clone();
@@ -448,7 +448,7 @@ pub async fn teardown_token(
     tunnel_name: &str,
     hostname: &str,
     namespace: &str,
-    target_type: &str,
+    target_type: &TargetType,
     pid: Option<u32>,
 ) -> Result<(), String> {
     let client = Client::builder()
@@ -468,7 +468,7 @@ pub async fn teardown_token(
     emit(app, &format!("  -> Tunnel ID: {}", tunnel_id));
 
     emit(app, "[2/4] Stopping proxy daemon or K8s deployment...");
-    if target_type == "k8s" {
+    if *target_type == TargetType::K8s {
         if run_streamed(app, "helm", &["uninstall", "cloudflared", "--namespace", namespace]).await.is_ok() {
             emit(app, "  -> Helm release removed");
         } else if run_streamed(app, "kubectl", &["delete", "namespace", namespace, "--ignore-not-found"]).await.is_ok() {
@@ -510,7 +510,7 @@ pub async fn teardown_browser(
     project_id: &str,
     tunnel_name: &str,
     namespace: &str,
-    target_type: &str,
+    target_type: &TargetType,
     pid: Option<u32>,
 ) -> Result<(), String> {
     let cert = project_cert_path(project_id);
@@ -518,7 +518,7 @@ pub async fn teardown_browser(
         .ok_or_else(|| "Cert path is not valid UTF-8".to_string())?;
 
     emit(app, "[1/2] Stopping local process or K8s deployment...");
-    if target_type == "k8s" {
+    if *target_type == TargetType::K8s {
         run_streamed(app, "kubectl", &["delete", "namespace", namespace, "--ignore-not-found"])
             .await.ok();
         emit(app, "  -> Namespace removed");
