@@ -71,9 +71,9 @@
     <div class="flex items-center gap-2">
       <!-- Refresh -->
       <button
-        class="btn btn-ghost btn-sm gap-1.5 text-base-content/40"
+        class="btn btn-ghost btn-sm gap-1.5 text-base-content/60 hover:text-base-content"
         onclick={() => refresh(true)}
-        disabled={store.busy || store.tunnelsLoading}
+        disabled={store.tunnelsLoading}
       >
         {#if store.tunnelsLoading}
           <span class="loading loading-spinner loading-xs"></span>
