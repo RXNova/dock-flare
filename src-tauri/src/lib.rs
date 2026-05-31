@@ -5,8 +5,14 @@ mod orchestrate;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .expect("HTTP client");
+
     tauri::Builder::default()
         .manage(commands::DeployLock(tokio::sync::Mutex::new(())))
+        .manage(commands::AppClient(http_client))
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             commands::get_projects,

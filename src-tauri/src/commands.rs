@@ -7,6 +7,7 @@ use crate::config::{self, Project, TargetType, TunnelConfig};
 use crate::orchestrate;
 
 pub struct DeployLock(pub tokio::sync::Mutex<()>);
+pub struct AppClient(pub reqwest::Client);
 
 // ── Return type for tunnel list ───────────────────────────────────────────────
 
@@ -50,8 +51,8 @@ pub fn delete_project(app: AppHandle, id: String) {
 pub async fn list_project_tunnels(
     app: AppHandle,
     project: Project,
+    client_state: tauri::State<'_, AppClient>,
 ) -> Result<Vec<TunnelInfo>, String> {
-    // Always load local metadata from disk (the JS-side project may lack tunnel array)
     let local = config::load(&app)
         .into_iter()
         .find(|p| p.id == project.id)
@@ -59,11 +60,8 @@ pub async fn list_project_tunnels(
         .unwrap_or_default();
 
     if project.auth_mode == "token" && !project.api_token.is_empty() {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
-            .map_err(|e| e.to_string())?;
-        let cf_tunnels = cloudflare::list_tunnels(&client, &project.api_token, &project.account_id)
+        let client = &client_state.0;
+        let cf_tunnels = cloudflare::list_tunnels(client, &project.api_token, &project.account_id)
             .await?;
 
         Ok(cf_tunnels.into_iter().map(|ct| {
@@ -198,11 +196,8 @@ fn parse_argo_token(cert_path: &std::path::PathBuf) -> Option<(String, String, S
 ///
 /// The discovered zone becomes the project's domain — the user never types it.
 #[tauri::command]
-pub async fn discover_zone(project: Project) -> Result<ZoneInfo, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| e.to_string())?;
+pub async fn discover_zone(project: Project, client_state: tauri::State<'_, AppClient>) -> Result<ZoneInfo, String> {
+    let client = &client_state.0;
 
     if project.auth_mode == "browser" {
         let cert = orchestrate::project_cert_path(&project.id);
