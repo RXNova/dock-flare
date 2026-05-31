@@ -1,0 +1,31 @@
+# Spec / planning docs
+LocalCloud-Orchestrator-Spec.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies
+node_modules/
+
+# Build outputs
+/build
+/.svelte-kit
+/package
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/android
+src-tauri/gen/apple
+
+# Logs
+*.log
