@@ -338,15 +338,24 @@ pub async fn delete_dns_cname(
         .await
         .map_err(|e| e.to_string())?;
 
+    let mut errors: Vec<String> = vec![];
     for record in body.result.unwrap_or_default() {
-        let _ = client
+        match client
             .delete(format!(
                 "https://api.cloudflare.com/client/v4/zones/{}/dns_records/{}",
                 zone_id, record.id
             ))
             .bearer_auth(api_token)
             .send()
-            .await;
+            .await
+        {
+            Err(e) => errors.push(format!("delete {} failed: {}", record.id, e)),
+            Ok(resp) => match resp.json::<CfResp<serde_json::Value>>().await {
+                Err(e) => errors.push(format!("parse response for {}: {}", record.id, e)),
+                Ok(r) if !r.success => errors.push(format!("delete {} error: {:?}", record.id, r.errors)),
+                _ => {}
+            },
+        }
     }
-    Ok(())
+    if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) }
 }
