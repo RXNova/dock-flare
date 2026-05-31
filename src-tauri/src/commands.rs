@@ -400,7 +400,6 @@ pub async fn update_tunnel_service(
     Ok(())
 }
 
-#[tauri::command]
 /// Clear stored credentials for a token-mode project so the user can re-enter them.
 /// Deletes the keychain entry and blanks api_token, account_id, and domain in config.
 #[tauri::command]
