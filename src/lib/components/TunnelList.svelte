@@ -36,6 +36,12 @@
     await api.upsertProject(updated);
     store.upsertProject(updated);
   }
+
+  // Return to AuthSetup to re-enter credentials (token projects only)
+  async function reconfig() {
+    await api.reconfigureProject(project.id);
+    store.upsertProject({ ...project, api_token: '', account_id: '', domain: '' });
+  }
 </script>
 
 <div class="flex-1 overflow-y-auto p-5 space-y-3">
@@ -54,6 +60,10 @@
           <span class="text-base-content/20">·</span>
           <button class="text-[11px] text-base-content/30 hover:text-base-content/60 transition-colors"
                   onclick={reauth} disabled={store.busy}>re-auth</button>
+        {:else}
+          <span class="text-base-content/20">·</span>
+          <button class="text-[11px] text-base-content/30 hover:text-base-content/60 transition-colors"
+                  onclick={reconfig} disabled={store.busy}>re-configure</button>
         {/if}
       </div>
     </div>

@@ -401,6 +401,21 @@ pub async fn update_tunnel_service(
 }
 
 #[tauri::command]
+/// Clear stored credentials for a token-mode project so the user can re-enter them.
+/// Deletes the keychain entry and blanks api_token, account_id, and domain in config.
+#[tauri::command]
+pub fn reconfigure_project(app: AppHandle, project_id: String) {
+    keychain::delete_token(&project_id);
+    let mut projects = config::load(&app);
+    if let Some(p) = projects.iter_mut().find(|p| p.id == project_id) {
+        p.api_token  = String::new();
+        p.account_id = String::new();
+        p.domain     = String::new();
+    }
+    config::save(&app, &projects);
+}
+
+#[tauri::command]
 pub fn get_log_file_path() -> String {
     orchestrate::log_file_path().to_string_lossy().to_string()
 }

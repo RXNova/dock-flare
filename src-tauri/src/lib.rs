@@ -29,6 +29,7 @@ pub fn run() {
             commands::discover_zone,
             commands::cancel_login,
             commands::open_url,
+            commands::reconfigure_project,
             commands::get_log_file_path,
             commands::clear_persistent_logs,
             commands::update_tunnel_service,
