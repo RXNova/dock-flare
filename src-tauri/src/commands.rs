@@ -4,6 +4,7 @@ use base64::Engine as _;
 
 use crate::cloudflare;
 use crate::config::{self, Project, TargetType, TunnelConfig};
+use crate::keychain;
 use crate::orchestrate;
 
 pub struct DeployLock(pub tokio::sync::Mutex<()>);
@@ -25,11 +26,25 @@ pub struct TunnelInfo {
 
 #[tauri::command]
 pub fn get_projects(app: AppHandle) -> Vec<Project> {
-    config::load(&app)
+    let mut projects = config::load(&app);
+    for p in projects.iter_mut() {
+        if p.auth_mode == "token" && p.api_token.is_empty() {
+            if let Some(token) = keychain::load_token(&p.id) {
+                p.api_token = token;
+            }
+        }
+    }
+    projects
 }
 
 #[tauri::command]
-pub fn upsert_project(app: AppHandle, project: Project) {
+pub fn upsert_project(app: AppHandle, mut project: Project) {
+    if project.auth_mode == "token" && !project.api_token.is_empty() {
+        if let Err(e) = keychain::store_token(&project.id, &project.api_token) {
+            eprintln!("WARNING: keychain store failed: {}", e);
+        }
+        project.api_token = String::new();
+    }
     let mut projects = config::load(&app);
     match projects.iter_mut().find(|p| p.id == project.id) {
         Some(p) => *p = project,
@@ -40,6 +55,7 @@ pub fn upsert_project(app: AppHandle, project: Project) {
 
 #[tauri::command]
 pub fn delete_project(app: AppHandle, id: String) {
+    keychain::delete_token(&id);
     let mut projects = config::load(&app);
     projects.retain(|p| p.id != id);
     config::save(&app, &projects);

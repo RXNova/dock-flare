@@ -1,6 +1,7 @@
 mod cloudflare;
 mod commands;
 mod config;
+mod keychain;
 mod orchestrate;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
