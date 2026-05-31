@@ -1,5 +1,6 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 // ── Response envelope ─────────────────────────────────────────────────────────
 
@@ -38,6 +39,24 @@ pub struct CfZone {
 #[derive(Deserialize)]
 pub struct CfDnsRecord {
     pub id: String,
+}
+
+// Retry up to 2 times on HTTP 429 with 1s/2s backoff.
+async fn cf_send_with_retry<F, Fut>(mut f: F) -> Result<reqwest::Response, String>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<reqwest::Response, reqwest::Error>>,
+{
+    let mut attempt = 0usize;
+    loop {
+        let resp = f().await.map_err(|e| e.to_string())?;
+        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < 2 {
+            tokio::time::sleep(Duration::from_secs(if attempt == 0 { 1 } else { 2 })).await;
+            attempt += 1;
+            continue;
+        }
+        return Ok(resp);
+    }
 }
 
 // ── Tunnels ───────────────────────────────────────────────────────────────────
@@ -97,21 +116,14 @@ pub async fn create_tunnel(
     #[derive(Deserialize)]
     struct Res { id: String }
 
-    client
-        .post(format!(
-            "https://api.cloudflare.com/client/v4/accounts/{}/cfdtunnel",
-            account_id
-        ))
-        .bearer_auth(api_token)
-        .json(&Req { name, tunnel_secret: secret })
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .json::<CfResp<Res>>()
-        .await
-        .map_err(|e| e.to_string())?
-        .into_result()
-        .map(|r| r.id)
+    let url = format!("https://api.cloudflare.com/client/v4/accounts/{}/cfdtunnel", account_id);
+    let body = serde_json::to_string(&Req { name, tunnel_secret: secret }).map_err(|e| e.to_string())?;
+    cf_send_with_retry(|| {
+        client.post(&url).bearer_auth(api_token)
+            .header("Content-Type", "application/json").body(body.clone()).send()
+    }).await?
+    .json::<CfResp<Res>>().await.map_err(|e| e.to_string())?
+    .into_result().map(|r| r.id)
 }
 
 pub async fn get_tunnel_token(
@@ -194,20 +206,10 @@ pub async fn delete_tunnel(
         .send()
         .await;
 
-    client
-        .delete(format!(
-            "https://api.cloudflare.com/client/v4/accounts/{}/cfdtunnel/{}",
-            account_id, tunnel_id
-        ))
-        .bearer_auth(api_token)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .json::<CfResp<serde_json::Value>>()
-        .await
-        .map_err(|e| e.to_string())?
-        .into_result()
-        .map(|_| ())
+    let url = format!("https://api.cloudflare.com/client/v4/accounts/{}/cfdtunnel/{}", account_id, tunnel_id);
+    cf_send_with_retry(|| client.delete(&url).bearer_auth(api_token).send()).await?
+        .json::<CfResp<serde_json::Value>>().await.map_err(|e| e.to_string())?
+        .into_result().map(|_| ())
 }
 
 // ── DNS ───────────────────────────────────────────────────────────────────────
@@ -304,27 +306,16 @@ pub async fn create_dns_cname(
         ttl: u32,
         proxied: bool,
     }
-    client
-        .post(format!(
-            "https://api.cloudflare.com/client/v4/zones/{}/dns_records",
-            zone_id
-        ))
-        .bearer_auth(api_token)
-        .json(&Rec {
-            r#type: "CNAME",
-            name: hostname.to_string(),
-            content: format!("{}.cfargotunnel.com", tunnel_id),
-            ttl: 1,
-            proxied: true,
-        })
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .json::<CfResp<serde_json::Value>>()
-        .await
-        .map_err(|e| e.to_string())?
-        .into_result()
-        .map(|_| ())
+    let url = format!("https://api.cloudflare.com/client/v4/zones/{}/dns_records", zone_id);
+    let rec = Rec { r#type: "CNAME", name: hostname.to_string(),
+        content: format!("{}.cfargotunnel.com", tunnel_id), ttl: 1, proxied: true };
+    let body = serde_json::to_string(&rec).map_err(|e| e.to_string())?;
+    cf_send_with_retry(|| {
+        client.post(&url).bearer_auth(api_token)
+            .header("Content-Type", "application/json").body(body.clone()).send()
+    }).await?
+    .json::<CfResp<serde_json::Value>>().await.map_err(|e| e.to_string())?
+    .into_result().map(|_| ())
 }
 
 pub async fn delete_dns_cname(
