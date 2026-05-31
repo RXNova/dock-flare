@@ -279,7 +279,7 @@ pub async fn install_cloudflared(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn cloudflared_login(app: AppHandle, project_id: String) -> Result<(), String> {
     let default_cert = orchestrate::cf_home_path().join("cert.pem");
-    let backup       = orchestrate::cf_home_path().join("cert.pem.dockflare-bak");
+    let backup       = orchestrate::cf_home_path().join(format!("cert.pem.{}.bak", project_id));
     let project_cert = orchestrate::project_cert_path(&project_id);
 
     // cloudflared refuses to run `tunnel login` if cert.pem already exists.
