@@ -160,12 +160,13 @@ pub async fn teardown_tunnel(
 
     orchestrate::emit(&app, &format!("=== DockFlare Teardown [{}] ===", project.domain));
 
-    // Look up stored target_type and pid for correct cleanup
-    let (target_type, pid) = config::load(&app)
-        .into_iter()
+    // Single load — find meta, run teardown, then update and save in one pass
+    let mut projects = config::load(&app);
+    let (target_type, pid) = projects
+        .iter()
         .find(|p| p.id == project.id)
-        .and_then(|p| p.tunnels.into_iter().find(|t| t.name == tunnel_name))
-        .map(|m| (m.target_type, m.pid))
+        .and_then(|p| p.tunnels.iter().find(|t| t.name == tunnel_name))
+        .map(|m| (m.target_type.clone(), m.pid))
         .unwrap_or_else(|| (TargetType::default(), None));
 
     let result = if project.auth_mode == "browser" {
@@ -176,7 +177,6 @@ pub async fn teardown_tunnel(
 
     if result.is_ok() {
         orchestrate::emit(&app, "=== Teardown complete ===");
-        let mut projects = config::load(&app);
         if let Some(p) = projects.iter_mut().find(|p| p.id == project.id) {
             p.tunnels.retain(|t| t.name != tunnel_name);
         }
