@@ -2,7 +2,9 @@ import type { AppStatus, Project, TunnelInfo } from './types';
 
 class AppStore {
   // ── Appearance ────────────────────────────────────────────
-  theme = $state<'dark' | 'light'>('dark');
+  theme = $state<'dark' | 'light'>(
+    (() => { try { return (localStorage.getItem('df-theme') as 'dark' | 'light') ?? 'dark'; } catch { return 'dark'; } })()
+  );
 
   // ── Projects ──────────────────────────────────────────────
   projects    = $state<Project[]>([]);
