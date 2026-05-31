@@ -5,7 +5,6 @@
 
   let showAdd   = $state(false);
   let newDomain = $state('');
-  let newMode   = $state<'token' | 'browser'>('token');
   let adding    = $state(false);
 
   function isAuthenticated(p: Project): boolean {
@@ -21,7 +20,7 @@
     const p: Project = {
       id: crypto.randomUUID(),
       domain: trimmed,
-      auth_mode: newMode,
+      auth_mode: 'token', // default; user picks in AuthSetup
       api_token: '',
       account_id: '',
     };
@@ -29,7 +28,6 @@
     store.upsertProject(p);
     store.selectedId = p.id;
     newDomain = '';
-    newMode   = 'token';
     showAdd   = false;
     adding    = false;
   }
@@ -72,17 +70,6 @@
         class="input input-xs w-full bg-base-200 border-base-300 font-mono
                focus:outline-none focus:ring-1 focus:ring-primary/30"
       />
-      <div class="flex gap-1">
-        {#each [['token','API Token'],['browser','Browser']] as [m, label] (m)}
-          <button
-            class="flex-1 py-0.5 rounded text-[10px] font-medium transition-all
-                   {newMode === m
-                     ? 'bg-primary text-primary-content'
-                     : 'bg-base-200 text-base-content/50 hover:text-base-content/70'}"
-            onclick={() => (newMode = m as 'token' | 'browser')}
-          >{label}</button>
-        {/each}
-      </div>
       <div class="flex gap-1.5">
         <button
           class="btn btn-primary btn-xs flex-1"
@@ -101,13 +88,17 @@
   <div class="flex-1 overflow-y-auto space-y-0.5 px-2 pb-4">
     {#each store.projects as p (p.id)}
       {@const authed = isAuthenticated(p)}
-      <button
-        class="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left transition-colors group
+      <!-- Using div+role to allow a real <button> inside for the delete action -->
+      <div
+        role="button"
+        tabindex="0"
+        class="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg cursor-pointer transition-colors group
                {store.selectedId === p.id
                  ? 'bg-primary/10 border border-primary/20'
-                 : 'hover:bg-base-300/60 border border-transparent'}"
+                 : 'hover:bg-base-300/60 border border-transparent'}
+               {store.busy ? 'pointer-events-none opacity-60' : ''}"
         onclick={() => { store.selectedId = p.id; store.tunnels = []; }}
-        disabled={store.busy}
+        onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { store.selectedId = p.id; store.tunnels = []; } }}
       >
         <!-- Auth status dot -->
         <span class="w-2 h-2 rounded-full flex-shrink-0 {authed ? 'bg-emerald-400' : 'bg-amber-400'}"></span>
@@ -137,7 +128,7 @@
                  6.53a.75.75 0 010-1.06z"/>
           </svg>
         </button>
-      </button>
+      </div>
     {:else}
       <p class="px-2 py-3 text-xs text-base-content/30 text-center">
         No projects yet.<br/>Click + to add a domain.
