@@ -16,7 +16,12 @@ fn cf_home() -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cloudflared")
 }
 
-/// Per-project cert path so multiple Cloudflare accounts don't share ~/.cloudflared/cert.pem.
+pub fn cf_home_path() -> std::path::PathBuf {
+    cf_home()
+}
+
+/// Per-project cert. cloudflared login always writes ~/.cloudflared/cert.pem;
+/// we copy it here afterwards so each project keeps its own isolated credential.
 pub fn project_cert_path(project_id: &str) -> std::path::PathBuf {
     cf_home().join(format!("dockflare-{}.pem", project_id))
 }

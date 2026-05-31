@@ -175,11 +175,18 @@ pub async fn install_cloudflared(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn cloudflared_login(app: AppHandle, project_id: String) -> Result<(), String> {
-    let cert = orchestrate::project_cert_path(&project_id);
-    let cert_str = cert.to_str().unwrap().to_string();
-    orchestrate::emit(&app, &format!("Authorizing project — cert will be saved to {}", cert_str));
+    orchestrate::emit(&app, "Opening Cloudflare authorization in your browser...");
     orchestrate::emit(&app, "(If the browser doesn't open, copy the URL printed below.)");
-    orchestrate::run_streamed(&app, "cloudflared", &["--origincert", &cert_str, "tunnel", "login"]).await?;
-    orchestrate::emit(&app, "Authorization complete.");
+
+    // cloudflared always writes to ~/.cloudflared/cert.pem regardless of --origincert,
+    // so we run a plain login and then copy the result to the project-specific path.
+    orchestrate::run_streamed(&app, "cloudflared", &["tunnel", "login"]).await?;
+
+    let default_cert = orchestrate::cf_home_path().join("cert.pem");
+    let project_cert = orchestrate::project_cert_path(&project_id);
+    std::fs::copy(&default_cert, &project_cert)
+        .map_err(|e| format!("Login succeeded but could not copy cert: {}", e))?;
+
+    orchestrate::emit(&app, &format!("Authorization complete. Cert saved to {}", project_cert.display()));
     Ok(())
 }
