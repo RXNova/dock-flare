@@ -41,6 +41,11 @@ pub struct CfDnsRecord {
     pub id: String,
 }
 
+#[derive(Deserialize)]
+pub struct CfAccount {
+    pub id: String,
+}
+
 // Retry up to 2 times on HTTP 429 with 1s/2s backoff.
 async fn cf_send_with_retry<F, Fut>(mut f: F) -> Result<reqwest::Response, String>
 where
@@ -213,6 +218,25 @@ pub async fn delete_tunnel(
 }
 
 // ── DNS ───────────────────────────────────────────────────────────────────────
+
+pub async fn list_accounts(
+    client: &Client,
+    api_token: &str,
+) -> Result<Vec<CfAccount>, String> {
+    let body: CfResp<Vec<CfAccount>> = client
+        .get("https://api.cloudflare.com/client/v4/accounts")
+        .bearer_auth(api_token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !body.success {
+        return Err(format!("Cloudflare API error: {:?}", body.errors));
+    }
+    Ok(body.result.unwrap_or_default())
+}
 
 /// List all zones the API token can access (optionally scoped to an account).
 pub async fn list_zones(

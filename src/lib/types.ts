@@ -11,6 +11,7 @@ export interface Project {
 export interface ZoneInfo {
   zone: string;            // primary zone = the project's domain
   all: string[];           // all reachable zones (token mode may have several)
+  account_id: string;      // discovered account ID (empty for browser mode)
 }
 
 export interface TunnelInfo {

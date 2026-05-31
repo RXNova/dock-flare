@@ -12,6 +12,7 @@
   let cancelled    = $state(false);
   let cfAuthorized = $state(false);   // cert exists on disk (browser)
   let discovered   = $state<ZoneInfo | null>(null);  // zone found after browser auth
+  let selectedZone = $state('');
   let errorMsg     = $state<string | null>(null);
 
   // Sync local fields when the selected project changes
@@ -38,14 +39,33 @@
     };
     try {
       const zi = await api.discoverZone(candidate);
-      const updated = { ...candidate, domain: zi.zone };
-      await api.upsertProject(updated);
-      store.upsertProject(updated);   // ProjectView switches to TunnelList
+      // Use auto-discovered account_id if the user left it blank
+      const resolvedAccountId = zi.account_id || accountId;
+      if (zi.all.length > 1) {
+        // Multiple zones — show picker before saving
+        discovered = zi;
+        selectedZone = zi.zone;
+        accountId = resolvedAccountId;
+      } else {
+        const updated = { ...candidate, domain: zi.zone, account_id: resolvedAccountId };
+        await api.upsertProject(updated);
+        store.upsertProject(updated);   // ProjectView switches to TunnelList
+      }
     } catch (e) {
       errorMsg = String(e);
     } finally {
       working = false;
     }
+  }
+
+  async function commitToken() {
+    const updated = {
+      ...project, auth_mode: 'token' as const,
+      api_token: apiToken, account_id: accountId,
+      domain: selectedZone,
+    };
+    await api.upsertProject(updated);
+    store.upsertProject(updated);
   }
 
   // ── Browser mode ───────────────────────────────────────────────────────────
@@ -63,6 +83,7 @@
       working = true;
       try {
         discovered = await api.discoverZone({ ...project, auth_mode: 'browser' });
+        selectedZone = discovered.zone;
       } catch (e) {
         errorMsg = String(e);
       } finally {
@@ -82,7 +103,7 @@
     if (!discovered) return;
     const updated = {
       ...project, auth_mode: 'browser' as const,
-      domain: discovered.zone, browser_authed: true,
+      domain: selectedZone || discovered.zone, browser_authed: true,
     };
     await api.upsertProject(updated);
     store.upsertProject(updated);   // ProjectView switches to TunnelList
@@ -100,6 +121,7 @@
     errorMsg = null;
     try {
       discovered = await api.discoverZone({ ...project, auth_mode: 'browser' });
+      selectedZone = discovered.zone;
     } catch (e) {
       errorMsg = String(e);
     } finally {
@@ -181,8 +203,8 @@
                        font-mono text-[11px]" />
             </div>
             <div class="space-y-1.5">
-              <p class="text-xs font-medium text-base-content/50">Account ID</p>
-              <input type="text" placeholder="a1b2c3d4…"
+              <p class="text-xs font-medium text-base-content/50">Account ID <span class="text-base-content/30 font-normal">(optional)</span></p>
+              <input type="text" placeholder="auto-detected from token"
                 bind:value={accountId} disabled={working}
                 class="input input-sm w-full bg-base-100 border-base-300
                        focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/50
@@ -207,7 +229,7 @@
 
           <div class="flex justify-end">
             <button class="btn btn-primary btn-sm" onclick={connectToken}
-                    disabled={!apiToken || apiToken.length < 20 || !accountId || working}>
+                    disabled={!apiToken || apiToken.length < 20 || working}>
               {#if working}<span class="loading loading-spinner loading-xs"></span>{/if}
               Connect
             </button>

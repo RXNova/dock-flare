@@ -245,17 +245,28 @@ pub async fn discover_zone(project: Project, client_state: tauri::State<'_, AppC
         let (zone_id, _account_id, api_token) = parse_argo_token(&cert)
             .ok_or("Could not read the cert credentials. Re-authorize.")?;
         let zone = cloudflare::get_zone_by_id(&client, &api_token, &zone_id).await?;
-        Ok(ZoneInfo { zone: zone.name.clone(), all: vec![zone.name] })
+        Ok(ZoneInfo { zone: zone.name.clone(), all: vec![zone.name], account_id: String::new() })
     } else {
         if project.api_token.is_empty() {
             return Err("No API token set.".into());
         }
-        let zones = cloudflare::list_zones(&client, &project.api_token, &project.account_id).await?;
+        // If no account_id was provided, discover it from the token.
+        let resolved_account_id = if project.account_id.is_empty() {
+            cloudflare::list_accounts(client, &project.api_token)
+                .await?
+                .into_iter()
+                .next()
+                .map(|a| a.id)
+                .unwrap_or_default()
+        } else {
+            project.account_id.clone()
+        };
+        let zones = cloudflare::list_zones(client, &project.api_token, &resolved_account_id).await?;
         let all: Vec<String> = zones.into_iter().map(|z| z.name).collect();
         if all.is_empty() {
             return Err("This API token has no accessible zones.".into());
         }
-        Ok(ZoneInfo { zone: all[0].clone(), all })
+        Ok(ZoneInfo { zone: all[0].clone(), all, account_id: resolved_account_id })
     }
 }
 
@@ -265,6 +276,8 @@ pub struct ZoneInfo {
     pub zone: String,
     /// All zones reachable with this credential (token mode may have several).
     pub all: Vec<String>,
+    /// The Cloudflare account ID for this token (empty for browser mode).
+    pub account_id: String,
 }
 
 #[tauri::command]
