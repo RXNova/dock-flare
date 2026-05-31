@@ -33,10 +33,17 @@
     <span class="w-2.5 h-2.5 rounded-full bg-base-content/20"></span>
     <span class="ml-2 text-[10px] font-mono text-base-content/50">deployment log</span>
     {#if store.logs.length > 0}
-      <button
-        class="ml-auto text-[10px] text-base-content/50 hover:text-base-content transition-colors"
-        onclick={() => store.clearLogs()}
-      >clear</button>
+      <div class="ml-auto flex items-center gap-3">
+        <button
+          class="text-[10px] text-base-content/40 hover:text-base-content/70 transition-colors"
+          onclick={async () => { const p = await api.getLogFilePath(); api.openUrl('file://' + p); }}
+          title="Open persistent log file"
+        >view file</button>
+        <button
+          class="text-[10px] text-base-content/50 hover:text-base-content transition-colors"
+          onclick={() => store.clearLogs()}
+        >clear</button>
+      </div>
     {/if}
   </div>
   <div

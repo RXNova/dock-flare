@@ -11,6 +11,33 @@ use crate::config::{Project, TargetType, TunnelConfig};
 
 const CLOUDFLARED_IMAGE: &str = "cloudflare/cloudflared:2025.4.0";
 
+pub fn log_file_path() -> std::path::PathBuf {
+    std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
+        .join(".dock-flare")
+        .join("deploy.log")
+}
+
+fn append_to_log_file(msg: &str) {
+    let path = log_file_path();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(meta) = std::fs::metadata(&path) {
+        if meta.len() > 1_048_576 {
+            if let Ok(data) = std::fs::read(&path) {
+                let start = data.len().saturating_sub(102_400);
+                let mut trimmed = b"\n--- log truncated ---\n".to_vec();
+                trimmed.extend_from_slice(&data[start..]);
+                let _ = std::fs::write(&path, &trimmed);
+            }
+        }
+    }
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "{}", msg);
+    }
+}
+
 pub fn emit(app: &AppHandle, msg: &str) {
     use std::time::{SystemTime, UNIX_EPOCH};
     let ts = SystemTime::now()
@@ -20,7 +47,9 @@ pub fn emit(app: &AppHandle, msg: &str) {
             format!("{:02}:{:02}:{:02}", (s % 86400) / 3600, (s % 3600) / 60, s % 60)
         })
         .unwrap_or_else(|_| "??:??:??".to_string());
-    let _ = app.emit("log", format!("[{}] {}", ts, msg));
+    let line = format!("[{}] {}", ts, msg);
+    let _ = app.emit("log", &line);
+    append_to_log_file(&line);
 }
 
 fn cf_home() -> std::path::PathBuf {

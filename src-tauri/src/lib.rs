@@ -22,6 +22,8 @@ pub fn run() {
             commands::discover_zone,
             commands::cancel_login,
             commands::open_url,
+            commands::get_log_file_path,
+            commands::clear_persistent_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

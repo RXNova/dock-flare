@@ -313,3 +313,13 @@ pub async fn cloudflared_login(app: AppHandle, project_id: String) -> Result<(),
     orchestrate::emit(&app, &format!("Authorized. Cert saved to {}", project_cert.display()));
     Ok(())
 }
+
+#[tauri::command]
+pub fn get_log_file_path() -> String {
+    orchestrate::log_file_path().to_string_lossy().to_string()
+}
+
+#[tauri::command]
+pub fn clear_persistent_logs() {
+    let _ = std::fs::remove_file(orchestrate::log_file_path());
+}
