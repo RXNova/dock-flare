@@ -227,13 +227,35 @@
             <p class="text-[11px] text-amber-400">Token looks too short — Cloudflare tokens are usually 40+ characters</p>
           {/if}
 
-          <div class="flex justify-end">
-            <button class="btn btn-primary btn-sm" onclick={connectToken}
-                    disabled={!apiToken || apiToken.length < 20 || working}>
-              {#if working}<span class="loading loading-spinner loading-xs"></span>{/if}
-              Connect
-            </button>
-          </div>
+          {#if discovered && discovered.all.length > 1}
+            <!-- Zone picker — shown after discovery when token covers multiple zones -->
+            <div class="rounded-lg bg-emerald-400/8 border border-emerald-400/20 px-3 py-3 space-y-2">
+              <p class="text-xs text-base-content/70">Multiple zones found — choose one:</p>
+              <select bind:value={selectedZone}
+                class="select select-sm w-full bg-base-100 border-base-300 font-mono
+                       focus:outline-none focus:ring-2 focus:ring-primary/25">
+                {#each discovered.all as z}
+                  <option value={z}>{z}</option>
+                {/each}
+              </select>
+            </div>
+            <div class="flex justify-end gap-2">
+              <button class="btn btn-ghost btn-sm text-base-content/50"
+                      onclick={() => { discovered = null; }}
+                      disabled={working}>Back</button>
+              <button class="btn btn-primary btn-sm" onclick={commitToken} disabled={working}>
+                Save Project
+              </button>
+            </div>
+          {:else}
+            <div class="flex justify-end">
+              <button class="btn btn-primary btn-sm" onclick={connectToken}
+                      disabled={!apiToken || apiToken.length < 20 || working}>
+                {#if working}<span class="loading loading-spinner loading-xs"></span>{/if}
+                Connect
+              </button>
+            </div>
+          {/if}
 
         <!-- ── Browser ── -->
         {:else}
@@ -275,7 +297,7 @@
 
           {:else if discovered}
             <!-- Zone discovered — confirm -->
-            <div class="rounded-lg bg-emerald-400/8 border border-emerald-400/20 px-3 py-3 space-y-1">
+            <div class="rounded-lg bg-emerald-400/8 border border-emerald-400/20 px-3 py-3 space-y-2">
               <div class="flex items-center gap-2">
                 <svg class="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
                   <path fill-rule="evenodd" clip-rule="evenodd"
@@ -285,11 +307,16 @@
                 </svg>
                 <span class="text-xs text-base-content/70">Authorized for zone</span>
               </div>
-              <p class="text-sm font-mono font-semibold text-emerald-400 pl-5">{discovered.zone}</p>
               {#if discovered.all.length > 1}
-                <p class="text-[10px] text-base-content/35 pl-5">
-                  +{discovered.all.length - 1} more zone{discovered.all.length > 2 ? 's' : ''} on this account
-                </p>
+                <select bind:value={selectedZone}
+                  class="select select-sm w-full bg-base-100 border-base-300 font-mono text-sm
+                         focus:outline-none focus:ring-2 focus:ring-primary/25 ml-5">
+                  {#each discovered.all as z}
+                    <option value={z}>{z}</option>
+                  {/each}
+                </select>
+              {:else}
+                <p class="text-sm font-mono font-semibold text-emerald-400 pl-5">{discovered.zone}</p>
               {/if}
             </div>
             <div class="flex justify-end gap-2">
