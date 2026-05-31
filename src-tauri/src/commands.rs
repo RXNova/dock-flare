@@ -175,18 +175,38 @@ pub async fn install_cloudflared(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn cloudflared_login(app: AppHandle, project_id: String) -> Result<(), String> {
+    let default_cert = orchestrate::cf_home_path().join("cert.pem");
+    let backup       = orchestrate::cf_home_path().join("cert.pem.dockflare-bak");
+    let project_cert = orchestrate::project_cert_path(&project_id);
+
+    // cloudflared refuses to run `tunnel login` if cert.pem already exists.
+    // Move it aside so the login can write a fresh cert for this account,
+    // then restore it afterwards so other tools are unaffected.
+    if default_cert.exists() {
+        std::fs::rename(&default_cert, &backup)
+            .map_err(|e| format!("Could not move existing cert.pem: {}", e))?;
+    }
+
     orchestrate::emit(&app, "Opening Cloudflare authorization in your browser...");
     orchestrate::emit(&app, "(If the browser doesn't open, copy the URL printed below.)");
 
-    // cloudflared always writes to ~/.cloudflared/cert.pem regardless of --origincert,
-    // so we run a plain login and then copy the result to the project-specific path.
-    orchestrate::run_streamed(&app, "cloudflared", &["tunnel", "login"]).await?;
+    let result = orchestrate::run_streamed(&app, "cloudflared", &["tunnel", "login"]).await;
 
-    let default_cert = orchestrate::cf_home_path().join("cert.pem");
-    let project_cert = orchestrate::project_cert_path(&project_id);
+    if let Err(e) = result {
+        // Restore backup so we don't leave things in a broken state
+        if backup.exists() { let _ = std::fs::rename(&backup, &default_cert); }
+        return Err(e);
+    }
+
+    // Copy the freshly-written cert to the project-specific location
     std::fs::copy(&default_cert, &project_cert)
-        .map_err(|e| format!("Login succeeded but could not copy cert: {}", e))?;
+        .map_err(|e| format!("Login succeeded but could not save project cert: {}", e))?;
 
-    orchestrate::emit(&app, &format!("Authorization complete. Cert saved to {}", project_cert.display()));
+    // Restore the old cert.pem so other tools keep working
+    if backup.exists() {
+        let _ = std::fs::rename(&backup, &default_cert);
+    }
+
+    orchestrate::emit(&app, &format!("Authorized. Cert saved to {}", project_cert.display()));
     Ok(())
 }
