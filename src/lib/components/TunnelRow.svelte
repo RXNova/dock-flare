@@ -7,7 +7,6 @@
   let { tunnel }: { tunnel: TunnelInfo } = $props();
 
   let confirming  = $state(false);
-  let pendingNs   = $state('');
   let editing     = $state(false);
   let editService = $state('');
   let copied      = $state(false);
@@ -19,7 +18,6 @@
   }
 
   $effect(() => { if (editing)    editService = tunnel.service  ?? ''; });
-  $effect(() => { if (confirming) pendingNs   = tunnel.namespace ?? 'default'; });
 
   async function saveEdit() {
     const project = store.selectedProject!;
@@ -38,7 +36,7 @@
     store.status = 'processing';
     store.clearLogs();
     try {
-      await api.teardownTunnel(project, tunnel.name, tunnel.hostname ?? '', pendingNs);
+      await api.teardownTunnel(project, tunnel.name, tunnel.hostname ?? '', tunnel.namespace ?? 'default');
       store.status = 'success';
       store.tunnels = await api.listProjectTunnels(project);
     } catch (e) {
@@ -85,38 +83,18 @@
     <span class="text-[10px] font-medium flex-shrink-0 {scol}">{tunnel.status}</span>
 
     <!-- Actions -->
-    {#if confirming}
-      <div class="flex items-center gap-1 ml-auto">
-        <span class="text-[10px] text-base-content/40 mr-1">ns:</span>
-        <input type="text" bind:value={pendingNs}
-          class="input input-xs w-24 bg-base-100 border-base-300 font-mono text-[10px]
-                 focus:outline-none focus:ring-1 focus:ring-red-500/30"
-          placeholder="namespace" />
-        <button class="btn btn-error btn-xs px-2" onclick={teardown} disabled={store.busy}>
-          {#if store.busy}
-            <span class="loading loading-spinner loading-xs"></span>
-          {:else}
-            <Check class="w-3 h-3" strokeWidth={2.5} />
-          {/if}
+    <div class="flex items-center gap-0.5 ml-auto flex-shrink-0">
+      {#if isToken}
+        <button class="btn btn-ghost btn-xs px-1.5 text-base-content/30 hover:text-primary hover:bg-primary/10"
+                onclick={() => (editing = !editing)} disabled={store.busy} title="Edit service URL">
+          <Pencil class="w-3 h-3" strokeWidth={2} />
         </button>
-        <button class="btn btn-ghost btn-xs px-1" onclick={() => (confirming = false)} disabled={store.busy}>
-          <X class="w-3 h-3" strokeWidth={2} />
-        </button>
-      </div>
-    {:else}
-      <div class="flex items-center gap-0.5 ml-1 flex-shrink-0">
-        {#if isToken}
-          <button class="btn btn-ghost btn-xs px-1.5 text-base-content/30 hover:text-primary hover:bg-primary/10"
-                  onclick={() => (editing = !editing)} disabled={store.busy} title="Edit service URL">
-            <Pencil class="w-3 h-3" strokeWidth={2} />
-          </button>
-        {/if}
-        <button class="btn btn-ghost btn-xs px-1.5 text-base-content/30 hover:text-red-400 hover:bg-red-400/10"
-                onclick={() => (confirming = true)} disabled={store.busy} title="Tear down tunnel">
-          <Trash2 class="w-3 h-3" strokeWidth={2} />
-        </button>
-      </div>
-    {/if}
+      {/if}
+      <button class="btn btn-ghost btn-xs px-1.5 text-base-content/30 hover:text-red-400 hover:bg-red-400/10"
+              onclick={() => (confirming = true)} disabled={store.busy} title="Tear down tunnel">
+        <Trash2 class="w-3 h-3" strokeWidth={2} />
+      </button>
+    </div>
   </div>
 
   <!-- Row 2: hostname · service · namespace -->
@@ -176,3 +154,32 @@
     </div>
   </div>
 </div>
+
+<dialog class="modal" class:modal-open={confirming}>
+  <div class="modal-box p-6 border border-base-300 shadow-xl max-w-sm">
+    <h3 class="font-bold text-base mb-2">Delete Tunnel</h3>
+    <p class="text-sm text-base-content/70">
+      Are you sure you want to delete tunnel <span class="font-mono text-base-content/90 font-medium">{tunnel.name}</span>?
+      This action will remove the Cloudflare tunnel and stop the local process.
+    </p>
+
+    <!-- For K8s tunnels, we need to prompt to delete the namespace optionally -->
+    <div class="modal-action mt-6 gap-2 border-t border-base-300 pt-4">
+      <button class="btn btn-ghost btn-sm" onclick={() => confirming = false} disabled={store.busy}>
+        Cancel
+      </button>
+      <button class="btn btn-error btn-sm gap-2" onclick={teardown} disabled={store.busy}>
+        {#if store.busy}
+          <span class="loading loading-spinner loading-xs"></span>
+          Deleting...
+        {:else}
+          <Trash2 class="w-3.5 h-3.5" strokeWidth={2} />
+          Yes, Delete
+        {/if}
+      </button>
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop bg-base-900/40">
+    <button onclick={() => confirming = false} disabled={store.busy}>close</button>
+  </form>
+</dialog>
