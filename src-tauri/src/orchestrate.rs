@@ -9,6 +9,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use crate::cloudflare;
 use crate::config::{Project, TunnelConfig};
 
+const CLOUDFLARED_IMAGE: &str = "cloudflare/cloudflared:2025.4.0";
+
 pub fn emit(app: &AppHandle, msg: &str) {
     use std::time::{SystemTime, UNIX_EPOCH};
     let ts = SystemTime::now()
@@ -417,7 +419,7 @@ spec:
     spec:
       containers:
       - name: cloudflared
-        image: cloudflare/cloudflared:latest
+        image: {image}
         args: ["tunnel", "--config", "/etc/cloudflared/config/config.yaml", "run"]
         volumeMounts:
         - name: config
@@ -434,7 +436,7 @@ spec:
         secret:
           secretName: cloudflared-creds
 "#,
-        ns = ns, tunnel_id = tunnel_id, domain = domain, service = service, creds_b64 = creds_b64,
+        ns = ns, tunnel_id = tunnel_id, domain = domain, service = service, creds_b64 = creds_b64, image = CLOUDFLARED_IMAGE,
     )
 }
 
