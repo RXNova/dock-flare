@@ -105,18 +105,7 @@
 
   <!-- Tunnel table -->
   <div class="rounded-xl border border-base-300 bg-base-200 overflow-hidden">
-    <!-- Table header (hidden on small screens — card layout has no header) -->
-    <div class="hidden md:flex items-center gap-3 px-4 py-2 border-b border-base-300 bg-base-300/30">
-      <span class="w-2 flex-shrink-0"></span>
-      <span class="text-[10px] font-semibold uppercase tracking-widest text-base-content/30 w-36">Name / Type</span>
-      <span class="text-[10px] font-semibold uppercase tracking-widest text-base-content/30 flex-1">Hostname</span>
-      <span class="text-[10px] font-semibold uppercase tracking-widest text-base-content/30 w-36">Service</span>
-      <span class="text-[10px] font-semibold uppercase tracking-widest text-base-content/30 w-20">Namespace</span>
-      <span class="text-[10px] font-semibold uppercase tracking-widest text-base-content/30 w-14 text-right">Status</span>
-      <span class="w-24"></span>
-    </div>
-
-    {#if store.tunnelsLoading && store.tunnels.length === 0}
+{#if store.tunnelsLoading && store.tunnels.length === 0}
       <div class="flex items-center justify-center gap-2 py-8 text-base-content/30">
         <span class="loading loading-spinner loading-sm"></span>
         <span class="text-xs">Loading tunnels…</span>
