@@ -121,7 +121,7 @@
 
   <!-- Service (editable) -->
   {#if editing}
-    <div class="flex items-center gap-1 w-36 hidden xl:flex">
+    <div class="flex items-center gap-1 w-36">
       <input type="text" bind:value={editService}
         class="input input-xs w-full bg-base-100 border-base-300 font-mono text-[10px]
                focus:outline-none focus:ring-1 focus:ring-primary/30" />
@@ -129,7 +129,7 @@
       <button class="btn btn-ghost btn-xs px-1" onclick={() => (editing = false)}>✕</button>
     </div>
   {:else}
-    <span class="text-xs text-base-content/40 w-36 truncate font-mono hidden xl:block">
+    <span class="text-xs text-base-content/40 w-36 truncate font-mono">
       {tunnel.service ?? '—'}
     </span>
   {/if}
@@ -177,7 +177,7 @@
       {#if store.selectedProject?.auth_mode === 'token'}
         <button
           class="btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity
-                 text-base-content/40 hover:text-primary hover:bg-primary/10 hidden xl:flex"
+                 text-base-content/40 hover:text-primary hover:bg-primary/10"
           onclick={() => (editing = true)}
           disabled={store.busy}
           title="Edit internal service URL"

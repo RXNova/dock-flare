@@ -120,7 +120,7 @@
       <span class="w-2 flex-shrink-0"></span>
       <span class="text-[10px] font-semibold uppercase tracking-widest text-base-content/30 w-36">Name / Type</span>
       <span class="text-[10px] font-semibold uppercase tracking-widest text-base-content/30 flex-1">Hostname</span>
-      <span class="text-[10px] font-semibold uppercase tracking-widest text-base-content/30 w-36 hidden xl:block">Service</span>
+      <span class="text-[10px] font-semibold uppercase tracking-widest text-base-content/30 w-36">Service</span>
       <span class="text-[10px] font-semibold uppercase tracking-widest text-base-content/30 w-20">Namespace</span>
       <span class="text-[10px] font-semibold uppercase tracking-widest text-base-content/30 w-14 text-right">Status</span>
       <span class="w-24"></span>
