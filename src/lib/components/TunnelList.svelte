@@ -15,7 +15,7 @@
       store.tunnels = await api.listProjectTunnels(project);
       store.tunnelsCacheTs = Date.now();
     } catch (e) {
-      store.appendLog(`Error listing tunnels: ${e}`);
+      store.appendLog(`Error listing tunnels: ${e instanceof Error ? e.message : JSON.stringify(e)}`);
     } finally {
       store.tunnelsLoading = false;
     }
