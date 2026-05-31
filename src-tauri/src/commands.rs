@@ -97,16 +97,42 @@ pub async fn list_project_tunnels(
             }
         }).collect())
     } else {
-        Ok(local.into_iter().map(|m| {
-            let tt = match m.target_type { TargetType::Local => "local", TargetType::K8s => "k8s" }.to_string();
+        let cert = orchestrate::project_cert_path(&project.id);
+        if !cert.exists() {
+            return Ok(vec![]);
+        }
+        let cert_str = cert.to_string_lossy();
+        let output = tokio::process::Command::new("cloudflared")
+            .args(&["--origincert", &cert_str, "tunnel", "list", "-o", "json"])
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run cloudflared tunnel list: {}", e))?;
+
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("cloudflared list failed: {}", err));
+        }
+
+        let json_str = String::from_utf8_lossy(&output.stdout);
+        let cf_tunnels: Vec<serde_json::Value> = serde_json::from_str(&json_str)
+            .unwrap_or_default();
+
+        Ok(cf_tunnels.into_iter().map(|ct| {
+            let id = ct["id"].as_str().unwrap_or_default().to_string();
+            let name = ct["name"].as_str().unwrap_or_default().to_string();
+            let meta = local.iter().find(|m| m.id == id || m.name == name);
+            
             TunnelInfo {
-                id:          m.id,
-                name:        m.name,
-                status:      "unknown".to_string(),
-                hostname:    Some(m.hostname),
-                service:     Some(m.service),
-                namespace:   Some(m.namespace),
-                target_type: Some(tt),
+                id,
+                name,
+                status: "unknown".to_string(), // cloudflared tunnel list doesn't return active status unfortunately
+                hostname:    meta.map(|m| m.hostname.clone()),
+                service:     meta.map(|m| m.service.clone()),
+                namespace:   meta.map(|m| m.namespace.clone()),
+                target_type: meta.map(|m| match m.target_type {
+                    TargetType::Local => "local".to_string(),
+                    TargetType::K8s  => "k8s".to_string(),
+                }),
             }
         }).collect())
     }

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { store } from '$lib/store.svelte';
   import { api } from '$lib/api';
   import TunnelRow from './TunnelRow.svelte';
@@ -23,7 +24,12 @@
 
   $effect(() => {
     const id = store.selectedId;
-    if (id) { store.tunnels = []; refresh(); }
+    if (id) {
+      untrack(() => {
+        store.tunnels = [];
+        refresh();
+      });
+    }
   });
 
   const authBadge = $derived(project.auth_mode === 'token' ? 'API token' : 'cloudflared');
