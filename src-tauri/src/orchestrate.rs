@@ -49,45 +49,6 @@ pub async fn run_silent(prog: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
-/// Like run_silent but kills the child and returns Err("timeout") if it exceeds the limit.
-pub async fn run_silent_timeout(
-    prog: &str,
-    args: &[&str],
-    secs: u64,
-) -> Result<String, String> {
-    let mut child = tokio::process::Command::new(prog)
-        .args(args)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("spawn '{}': {}", prog, e))?;
-
-    let pid = child.id();
-
-    match tokio::time::timeout(
-        std::time::Duration::from_secs(secs),
-        child.wait_with_output(),
-    )
-    .await
-    {
-        Ok(Ok(out)) => {
-            if out.status.success() {
-                Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
-            } else {
-                Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
-            }
-        }
-        Ok(Err(e)) => Err(e.to_string()),
-        Err(_) => {
-            // kill by PID since wait_with_output consumed the Child handle
-            if let Some(pid) = pid {
-                let _ = tokio::process::Command::new("kill").arg(pid.to_string()).output().await;
-            }
-            Err("timeout".to_string())
-        }
-    }
-}
-
 pub async fn run_streamed(app: &AppHandle, prog: &str, args: &[&str]) -> Result<(), String> {
     let mut child = tokio::process::Command::new(prog)
         .args(args)
@@ -122,10 +83,23 @@ pub async fn deploy_token(
 ) -> Result<String, String> {
     let client = Client::new();
 
-    emit(app, "[1/6] Checking prerequisites...");
-    for bin in &["kubectl", "helm"] {
+    emit(app, "[1/7] Checking prerequisites...");
+    let req_bins = if tunnel.target_type == "local" { vec!["cloudflared"] } else { vec!["kubectl", "helm"] };
+    for bin in req_bins {
         check_bin(bin).await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
     }
+    
+    if tunnel.target_type != "local" {
+        emit(app, "[2/7] Checking Kubernetes connectivity...");
+        if run_streamed(app, "kubectl", &["cluster-info"]).await.is_err() {
+            let msg = "Could not connect to Kubernetes cluster. Make sure Docker Desktop, Minikube, orbstack, or another local cluster is running and your KUBECONFIG is correct.";
+            emit(app, &format!("ERROR: {}", msg));
+            return Err(msg.to_string());
+        }
+    } else {
+        emit(app, "[2/7] Skipping K8s (local process mode)");
+    }
+
     let zone = cloudflare::extract_zone(&tunnel.public_hostname);
     emit(app, &format!("  -> Verifying zone '{}'...", zone));
     let zone_id = cloudflare::get_zone_id(&client, &project.api_token, &project.account_id, &zone)
@@ -155,42 +129,95 @@ pub async fn deploy_token(
     rand::thread_rng().fill_bytes(&mut secret_bytes);
     let secret = STANDARD.encode(secret_bytes);
 
-    emit(app, "[2/6] Creating Cloudflare tunnel...");
+    emit(app, "[3/7] Creating Cloudflare tunnel...");
     let tunnel_id = cloudflare::create_tunnel(
         &client, &project.api_token, &project.account_id, &tunnel.tunnel_name, &secret,
     ).await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
     emit(app, &format!("  -> Tunnel ID: {}", tunnel_id));
 
-    emit(app, "[3/6] Fetching tunnel token...");
+    emit(app, "[4/7] Fetching tunnel token...");
     let token = cloudflare::get_tunnel_token(
         &client, &project.api_token, &project.account_id, &tunnel_id,
     ).await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
     emit(app, "  -> Token acquired");
 
-    emit(app, "[4/6] Configuring ingress rules...");
-    cloudflare::configure_ingress(
+    emit(app, "[5/7] Configuring ingress rules...");
+    if let Err(e) = cloudflare::configure_ingress(
         &client, &project.api_token, &project.account_id, &tunnel_id,
         &tunnel.public_hostname, &tunnel.internal_service,
-    ).await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
+    ).await {
+        emit(app, &format!("ERROR: {}", e));
+        emit(app, "  -> Cleaning up orphaned tunnel...");
+        let _ = cloudflare::delete_tunnel(&client, &project.api_token, &project.account_id, &tunnel_id).await;
+        return Err(e);
+    }
     emit(app, &format!("  -> {} -> {}", tunnel.public_hostname, tunnel.internal_service));
 
-    emit(app, "[5/6] Creating DNS CNAME...");
-    cloudflare::create_dns_cname(
+    emit(app, "[6/7] Creating DNS CNAME...");
+    if let Err(e) = cloudflare::create_dns_cname(
         &client, &project.api_token, &zone_id, &tunnel.public_hostname, &tunnel_id,
-    ).await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
+    ).await {
+        emit(app, &format!("ERROR: {}", e));
+        emit(app, "  -> Cleaning up orphaned tunnel...");
+        let _ = cloudflare::delete_tunnel(&client, &project.api_token, &project.account_id, &tunnel_id).await;
+        return Err(e);
+    }
     emit(app, &format!("  -> {} → {}.cfargotunnel.com", tunnel.public_hostname, tunnel_id));
 
-    emit(app, "[6/6] Deploying cloudflared via Helm...");
-    run_silent("helm", &["repo", "add", "cloudflare", "https://cloudflare.github.io/helm-charts"])
-        .await.ok();
-    run_silent("helm", &["repo", "update"])
-        .await.map_err(|e| { emit(app, &format!("ERROR: helm repo update: {}", e)); e })?;
-    run_streamed(app, "helm", &[
-        "upgrade", "--install", "cloudflared", "cloudflare/cloudflare-tunnel",
-        "--namespace", &tunnel.k8s_namespace, "--create-namespace",
-        "--set", &format!("cloudflare.tunnelToken={}", token),
-    ]).await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
-    emit(app, "  -> Helm chart deployed");
+    if tunnel.target_type == "local" {
+        emit(app, "[7/7] Starting local cloudflared process...");
+        let a1 = app.clone();
+        let a2 = app.clone();
+        let token_arg = token.clone();
+        
+        // Spawn and detach
+        let mut child = tokio::process::Command::new("cloudflared")
+            .args(&["tunnel", "run", "--token", &token_arg])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                let msg = format!("Failed to spawn local cloudflared: {}", e);
+                emit(app, &format!("ERROR: {}", msg));
+                msg
+            })?;
+            
+        let stdout = BufReader::new(child.stdout.take().unwrap());
+        let stderr = BufReader::new(child.stderr.take().unwrap());
+        tokio::spawn(async move {
+            let mut lines = stdout.lines();
+            while let Ok(Some(l)) = lines.next_line().await { emit(&a1, &format!("[local] {}", l)); }
+        });
+        tokio::spawn(async move {
+            let mut lines = stderr.lines();
+            while let Ok(Some(l)) = lines.next_line().await { emit(&a2, &format!("[local] {}", l)); }
+        });
+        // We do not wait for the process to exit, it runs natively in the background.
+        emit(app, "  -> Local cloudflared is now routing traffic");
+    } else {
+        emit(app, "[7/7] Deploying cloudflared via Helm...");
+        run_silent("helm", &["repo", "add", "cloudflare", "https://cloudflare.github.io/helm-charts"])
+            .await.ok();
+        run_silent("helm", &["repo", "update"])
+            .await.map_err(|e| { 
+                let msg = format!("helm repo update: {}", e);
+                emit(app, &format!("ERROR: {}", msg)); 
+                msg 
+            })?;
+        
+        if let Err(e) = run_streamed(app, "helm", &[
+            "upgrade", "--install", "cloudflared", "cloudflare/cloudflare-tunnel",
+            "--namespace", &tunnel.k8s_namespace, "--create-namespace",
+            "--set", &format!("cloudflare.tunnelToken={}", token),
+        ]).await {
+            emit(app, &format!("ERROR: {}", e));
+            emit(app, "  -> Cleaning up orphaned tunnel due to Helm failure...");
+            let _ = cloudflare::delete_dns_cname(&client, &project.api_token, &zone_id, &tunnel.public_hostname).await;
+            let _ = cloudflare::delete_tunnel(&client, &project.api_token, &project.account_id, &tunnel_id).await;
+            return Err(e);
+        }
+        emit(app, "  -> Helm chart deployed");
+    }
 
     Ok(tunnel_id)
 }
@@ -205,8 +232,9 @@ pub async fn deploy_browser(
     let cert = project_cert_path(project_id);
     let cert_str = cert.to_str().unwrap();
 
-    emit(app, "[1/5] Checking prerequisites...");
-    for bin in &["cloudflared", "kubectl"] {
+    emit(app, "[1/6] Checking prerequisites...");
+    let req_bins = if tunnel.target_type == "local" { vec!["cloudflared"] } else { vec!["cloudflared", "kubectl"] };
+    for bin in req_bins {
         check_bin(bin).await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
     }
     if !cert.exists() {
@@ -216,7 +244,18 @@ pub async fn deploy_browser(
     }
     emit(app, "  -> Prerequisites OK");
 
-    emit(app, "[2/5] Creating tunnel...");
+    if tunnel.target_type != "local" {
+        emit(app, "[2/6] Checking Kubernetes connectivity...");
+        if run_streamed(app, "kubectl", &["cluster-info"]).await.is_err() {
+            let msg = "Could not connect to Kubernetes cluster. Make sure Docker Desktop, Minikube, orbstack, or another local cluster is running and your KUBECONFIG is correct.";
+            emit(app, &format!("ERROR: {}", msg));
+            return Err(msg.to_string());
+        }
+    } else {
+        emit(app, "[2/6] Skipping K8s (local process mode)");
+    }
+
+    emit(app, "[3/6] Creating tunnel...");
     let out = run_silent("cloudflared", &["--origincert", cert_str, "tunnel", "create", &tunnel.tunnel_name])
         .await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
     let tunnel_id = out.lines()
@@ -226,7 +265,7 @@ pub async fn deploy_browser(
         .ok_or_else(|| "Could not parse tunnel ID from cloudflared output".to_string())?;
     emit(app, &format!("  -> Tunnel ID: {}", tunnel_id));
 
-    emit(app, "[3/5] Routing DNS...");
+    emit(app, "[4/6] Routing DNS...");
     if let Err(e) = run_streamed(app, "cloudflared",
         &["--origincert", cert_str, "tunnel", "route", "dns", &tunnel.tunnel_name, &tunnel.public_hostname]).await
     {
@@ -239,23 +278,57 @@ pub async fn deploy_browser(
         ));
     }
 
-    emit(app, "[4/5] Generating K8s manifests...");
-    let creds_path = cf_home().join(format!("{}.json", tunnel_id));
-    let creds_b64 = STANDARD.encode(
-        std::fs::read(&creds_path)
-            .map_err(|e| format!("Cannot read credentials {}: {}", creds_path.display(), e))?,
-    );
-    let manifest = build_manifest(
-        &tunnel.k8s_namespace, &tunnel_id,
-        &tunnel.public_hostname, &tunnel.internal_service, &creds_b64,
-    );
-    let manifest_path = std::env::temp_dir().join("cloudflared-manifest.yaml");
-    std::fs::write(&manifest_path, &manifest).map_err(|e| format!("write manifest: {}", e))?;
-    emit(app, &format!("  -> Manifest written to {}", manifest_path.display()));
+    if tunnel.target_type == "local" {
+        emit(app, "[5/6] Starting local cloudflared process...");
+        let a1 = app.clone();
+        let a2 = app.clone();
+        
+        let mut child = tokio::process::Command::new("cloudflared")
+            // using `--url` to route directly via the local run process for browser auth tunnels
+            .args(&["--origincert", cert_str, "tunnel", "run", "--url", &tunnel.internal_service, &tunnel.tunnel_name])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                let msg = format!("Failed to spawn local cloudflared: {}", e);
+                emit(app, &format!("ERROR: {}", msg));
+                msg
+            })?;
+            
+        let stdout = BufReader::new(child.stdout.take().unwrap());
+        let stderr = BufReader::new(child.stderr.take().unwrap());
+        tokio::spawn(async move {
+            let mut lines = stdout.lines();
+            while let Ok(Some(l)) = lines.next_line().await { emit(&a1, &format!("[local] {}", l)); }
+        });
+        tokio::spawn(async move {
+            let mut lines = stderr.lines();
+            while let Ok(Some(l)) = lines.next_line().await { emit(&a2, &format!("[local] {}", l)); }
+        });
+        emit(app, "  -> Local cloudflared is now routing traffic");
+    } else {
+        emit(app, "[5/6] Generating K8s manifests...");
+        let creds_path = cf_home().join(format!("{}.json", tunnel_id));
+        let creds_b64 = STANDARD.encode(
+            std::fs::read(&creds_path)
+                .map_err(|e| format!("Cannot read credentials {}: {}", creds_path.display(), e))?,
+        );
+        let manifest = build_manifest(
+            &tunnel.k8s_namespace, &tunnel_id,
+            &tunnel.public_hostname, &tunnel.internal_service, &creds_b64,
+        );
+        let manifest_path = std::env::temp_dir().join("cloudflared-manifest.yaml");
+        std::fs::write(&manifest_path, &manifest).map_err(|e| format!("write manifest: {}", e))?;
+        emit(app, &format!("  -> Manifest written to {}", manifest_path.display()));
 
-    emit(app, "[5/5] Applying K8s manifests...");
-    run_streamed(app, "kubectl", &["apply", "-f", manifest_path.to_str().unwrap()])
-        .await.map_err(|e| { emit(app, &format!("ERROR: {}", e)); e })?;
+        emit(app, "[6/6] Applying K8s manifests...");
+        if let Err(e) = run_streamed(app, "kubectl", &["apply", "-f", manifest_path.to_str().unwrap()]).await {
+            emit(app, &format!("ERROR: {}", e));
+            emit(app, "  -> Cleaning up orphaned tunnel due to kubectl error...");
+            run_silent("cloudflared", &["--origincert", cert_str, "tunnel", "delete", "-f", &tunnel.tunnel_name]).await.ok();
+            return Err(e);
+        }
+    }
 
     Ok(tunnel_id)
 }
@@ -352,13 +425,15 @@ pub async fn teardown_token(
     })?;
     emit(app, &format!("  -> Tunnel ID: {}", tunnel_id));
 
-    emit(app, "[2/4] Removing K8s deployment...");
+    emit(app, "[2/4] Stopping proxy daemon or K8s deployment...");
     if run_streamed(app, "helm", &["uninstall", "cloudflared", "--namespace", namespace]).await.is_ok() {
         emit(app, "  -> Helm release removed");
-    } else {
-        run_streamed(app, "kubectl", &["delete", "namespace", namespace, "--ignore-not-found"])
-            .await.ok();
+    } else if run_streamed(app, "kubectl", &["delete", "namespace", namespace, "--ignore-not-found"]).await.is_ok() {
         emit(app, "  -> kubectl namespace deleted");
+    } else {
+        // Local mode fallback
+        run_silent("pkill", &["-f", "cloudflared tunnel run"]).await.ok();
+        emit(app, "  -> Local child processes killed");
     }
 
     emit(app, "[3/4] Deleting DNS record...");

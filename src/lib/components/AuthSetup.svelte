@@ -1,63 +1,91 @@
 <script lang="ts">
   import { store } from '$lib/store.svelte';
   import { api } from '$lib/api';
+  import type { ZoneInfo } from '$lib/types';
 
-  let project      = $derived(store.selectedProject!);
-  let saving       = $state(false);
-  let cfAuthorized = $state(false);
-  let authMode     = $state<'token' | 'browser'>('token');
-  let apiToken     = $state('');
-  let accountId    = $state('');
+  let project   = $derived(store.selectedProject!);
+  let authMode  = $state<'token' | 'browser'>('token');
+  let apiToken  = $state('');
+  let accountId = $state('');
+
+  let working      = $state(false);   // local busy (discovery), distinct from login
   let cancelled    = $state(false);
-  let domainCheck  = $state<{ ok: boolean; certain: boolean; detail: string } | null>(null);
+  let cfAuthorized = $state(false);   // cert exists on disk (browser)
+  let discovered   = $state<ZoneInfo | null>(null);  // zone found after browser auth
+  let errorMsg     = $state<string | null>(null);
 
-  // Sync when project changes; verify per-project cert on disk
+  // Sync local fields when the selected project changes
   $effect(() => {
-    if (project) {
-      apiToken     = project.api_token  ?? '';
-      accountId    = project.account_id ?? '';
-      authMode     = project.auth_mode as 'token' | 'browser';
-      cfAuthorized = project.browser_authed ?? false;
-      domainCheck  = null;
-      if (project.auth_mode === 'browser') {
-        api.checkCfAuth(project.id).then(v => {
-          cfAuthorized = v;
-          if (v) api.verifyDomainAuth(project.id, project.domain).then(r => { domainCheck = r; });
-        });
-      }
+    if (!project) return;
+    authMode     = project.auth_mode as 'token' | 'browser';
+    apiToken     = project.api_token  ?? '';
+    accountId    = project.account_id ?? '';
+    discovered   = null;
+    errorMsg     = null;
+    cfAuthorized = false;
+    if (project.auth_mode === 'browser') {
+      api.checkCfAuth(project.id).then(v => { cfAuthorized = v; });
     }
   });
 
-  async function save() {
-    saving = true;
-    const updated = { ...project, auth_mode: authMode, api_token: apiToken, account_id: accountId };
-    await api.upsertProject(updated);
-    store.upsertProject(updated);
-    saving = false;
+  // ── Token mode: connect = discover the zone, then persist ──────────────────
+  async function connectToken() {
+    working = true;
+    errorMsg = null;
+    const candidate = {
+      ...project, auth_mode: 'token' as const,
+      api_token: apiToken, account_id: accountId,
+    };
+    try {
+      const zi = await api.discoverZone(candidate);
+      const updated = { ...candidate, domain: zi.zone };
+      await api.upsertProject(updated);
+      store.upsertProject(updated);   // ProjectView switches to TunnelList
+    } catch (e) {
+      errorMsg = String(e);
+    } finally {
+      working = false;
+    }
   }
 
+  // ── Browser mode ───────────────────────────────────────────────────────────
   async function authorize() {
     cancelled = false;
+    errorMsg = null;
+    discovered = null;
     store.status = 'processing';
     store.clearLogs();
     try {
       await api.cloudflaredLogin(project.id);
       cfAuthorized = true;
       store.status = 'idle';
-      const updated = { ...project, auth_mode: 'browser' as const, browser_authed: true };
-      await api.upsertProject(updated);
-      store.upsertProject(updated);
-      // Verify the cert actually covers this project's domain
-      domainCheck = null;
-      domainCheck = await api.verifyDomainAuth(project.id, project.domain);
+      // Discover which zone the cert is for — this becomes the project's domain
+      working = true;
+      try {
+        discovered = await api.discoverZone({ ...project, auth_mode: 'browser' });
+      } catch (e) {
+        errorMsg = String(e);
+      } finally {
+        working = false;
+      }
     } catch (e) {
       if (cancelled) {
-        store.status = 'idle'; // user chose to cancel — not an error
+        store.status = 'idle';
       } else {
         store.status = 'failed';
         store.appendLog(`FATAL: ${e}`);
       }
     }
+  }
+
+  async function commitBrowser() {
+    if (!discovered) return;
+    const updated = {
+      ...project, auth_mode: 'browser' as const,
+      domain: discovered.zone, browser_authed: true,
+    };
+    await api.upsertProject(updated);
+    store.upsertProject(updated);   // ProjectView switches to TunnelList
   }
 
   async function cancelLogin() {
@@ -85,9 +113,7 @@
     store.removeProject(project.id);
   }
 
-  function cancel() {
-    store.selectedId = null;
-  }
+  function cancel() { store.selectedId = null; }
 </script>
 
 <div class="flex-1 overflow-y-auto p-5">
@@ -96,12 +122,11 @@
     <!-- Heading -->
     <div class="flex items-start justify-between">
       <div>
-        <h2 class="text-sm font-semibold">{project.domain}</h2>
+        <h2 class="text-sm font-semibold">{project.name || 'Untitled project'}</h2>
         <p class="text-xs text-base-content/40 mt-0.5">
-          Set up authentication to manage tunnels for this domain.
+          Authenticate to detect this project's domain and manage tunnels.
         </p>
       </div>
-      <!-- Cancel / deselect — always clickable, even during auth -->
       <button
         class="btn btn-ghost btn-xs text-base-content/30 hover:text-base-content/60 mt-0.5"
         onclick={store.busy ? cancelLogin : cancel}
@@ -123,8 +148,8 @@
                      {authMode === m
                        ? 'bg-base-100 shadow-sm text-base-content'
                        : 'text-base-content/40 hover:text-base-content/60'}"
-              onclick={() => (authMode = m as 'token' | 'browser')}
-              disabled={store.busy}
+              onclick={() => { authMode = m as 'token' | 'browser'; discovered = null; errorMsg = null; }}
+              disabled={store.busy || working}
             >{label}</button>
           {/each}
         </div>
@@ -138,7 +163,7 @@
             <div class="space-y-1.5">
               <p class="text-xs font-medium text-base-content/50">API Token</p>
               <input type="password" placeholder="cf_api_token_…"
-                bind:value={apiToken} disabled={store.busy}
+                bind:value={apiToken} disabled={working}
                 class="input input-sm w-full bg-base-100 border-base-300
                        focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/50
                        font-mono text-[11px]" />
@@ -146,31 +171,35 @@
             <div class="space-y-1.5">
               <p class="text-xs font-medium text-base-content/50">Account ID</p>
               <input type="text" placeholder="a1b2c3d4…"
-                bind:value={accountId} disabled={store.busy}
+                bind:value={accountId} disabled={working}
                 class="input input-sm w-full bg-base-100 border-base-300
                        focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/50
                        font-mono text-[11px]" />
             </div>
           </div>
           <p class="text-[11px] text-base-content/35">
-            Token needs <span class="font-mono text-base-content/50">Tunnel:Edit</span>
-            and <span class="font-mono text-base-content/50">DNS:Edit</span> permissions.
+            Token needs <span class="font-mono text-base-content/50">Tunnel:Edit</span>,
+            <span class="font-mono text-base-content/50">DNS:Edit</span> and
+            <span class="font-mono text-base-content/50">Zone:Read</span> permissions.
           </p>
+
+          {#if errorMsg}
+            <div class="rounded-lg bg-red-400/8 border border-red-400/25 px-3 py-2">
+              <p class="text-[11px] text-red-400">{errorMsg}</p>
+            </div>
+          {/if}
+
           <div class="flex justify-end">
-            <button
-              class="btn btn-primary btn-sm"
-              onclick={save}
-              disabled={!apiToken || !accountId || store.busy || saving}
-            >
-              {#if saving}<span class="loading loading-spinner loading-xs"></span>{/if}
-              Save &amp; Continue
+            <button class="btn btn-primary btn-sm" onclick={connectToken}
+                    disabled={!apiToken || !accountId || working}>
+              {#if working}<span class="loading loading-spinner loading-xs"></span>{/if}
+              Connect
             </button>
           </div>
 
-        <!-- ── Browser / cloudflared ── -->
+        <!-- ── Browser ── -->
         {:else}
           {#if store.cloudflaredFound === false}
-            <!-- cloudflared not installed -->
             <div class="flex items-center gap-3 rounded-lg bg-base-300/50 border border-base-300 px-3 py-2.5">
               <span class="w-2 h-2 rounded-full bg-red-400 flex-shrink-0"></span>
               <span class="text-xs text-base-content/50 flex-1">
@@ -183,119 +212,75 @@
             </div>
 
           {:else if store.busy}
-            <!-- Authorization in progress -->
+            <!-- Login in progress -->
             <div class="rounded-lg bg-base-300/50 border border-amber-400/20 px-3 py-3 space-y-2.5">
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2.5">
                   <span class="loading loading-spinner loading-xs text-amber-400 flex-shrink-0"></span>
                   <span class="text-xs font-medium text-base-content/70">Waiting for browser authorization…</span>
                 </div>
-                <button
-                  class="btn btn-ghost btn-xs text-red-400/60 hover:text-red-400"
-                  onclick={cancelLogin}
-                >Cancel login</button>
+                <button class="btn btn-ghost btn-xs text-red-400/60 hover:text-red-400" onclick={cancelLogin}>
+                  Cancel login
+                </button>
               </div>
               <p class="text-[11px] text-base-content/40 pl-5">
-                If the browser didn't open, click the URL in the terminal log below to open it.
+                If the browser didn't open, click the URL in the terminal log below.
               </p>
             </div>
 
-          {:else if cfAuthorized}
-            <!-- Already authorized -->
-            <div class="flex items-center gap-3 rounded-lg bg-base-300/50 border border-base-300 px-3 py-2.5">
-              <span class="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0"></span>
-              <span class="text-xs text-base-content/60 flex-1">
-                Authorized ·
-                <span class="font-mono text-[10px] text-base-content/30">
-                  dockflare-{project.id.slice(0, 8)}….pem
-                </span>
-              </span>
-              <button class="btn btn-xs btn-ghost text-base-content/40 hover:text-base-content/70"
-                      onclick={authorize}>
-                Reopen browser
-              </button>
+          {:else if working}
+            <!-- Discovering zone -->
+            <div class="flex items-center gap-2 text-[11px] text-base-content/40 px-1">
+              <span class="loading loading-spinner loading-xs"></span>
+              Detecting authorized domain…
             </div>
 
-            <!-- Domain verification result -->
-            {#if domainCheck === null}
-              <div class="flex items-center gap-2 text-[11px] text-base-content/30">
-                <span class="loading loading-spinner loading-xs"></span>
-                Verifying access to <span class="font-mono">{project.domain}</span>…
-              </div>
-            {:else if domainCheck.ok && domainCheck.certain}
-              <div class="flex items-center gap-2 rounded-lg bg-emerald-400/8 border border-emerald-400/20 px-3 py-2">
+          {:else if discovered}
+            <!-- Zone discovered — confirm -->
+            <div class="rounded-lg bg-emerald-400/8 border border-emerald-400/20 px-3 py-3 space-y-1">
+              <div class="flex items-center gap-2">
                 <svg class="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
                   <path fill-rule="evenodd" clip-rule="evenodd"
                     d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75
                        9.75S2.25 17.385 2.25 12zm13.36-1.814a.75.75 0 10-1.22-.872l-3.236 4.53L9.53
                        12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z"/>
                 </svg>
-                <span class="text-xs text-emerald-400">Cert covers <span class="font-mono font-medium">{project.domain}</span></span>
+                <span class="text-xs text-base-content/70">Authorized for zone</span>
               </div>
-            {:else if domainCheck.ok && !domainCheck.certain}
-              <!-- Inconclusive (timeout / unknown) — warn but don't block -->
-              <div class="flex items-center gap-2 rounded-lg bg-base-300/50 border border-base-300 px-3 py-2">
-                <svg class="w-3.5 h-3.5 text-base-content/30 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-                  <path fill-rule="evenodd" clip-rule="evenodd"
-                    d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25
-                       17.385 2.25 12zm8.706-1.442c1.146-.573 2.437.463 2.126 1.706l-.709 2.836.042-.02a.75.75
-                       0 01.67 1.34l-.04.022c-1.147.573-2.438-.463-2.127-1.706l.71-2.836-.042.02a.75.75 0
-                       11-.671-1.34l.041-.022zM12 9a.75.75 0 100-1.5.75.75 0 000 1.5z"/>
-                </svg>
-                <span class="text-[11px] text-base-content/40">{domainCheck.detail}</span>
-              </div>
-            {:else}
-              <div class="rounded-lg bg-amber-400/8 border border-amber-400/25 px-3 py-2.5 space-y-1.5">
-                <div class="flex items-center gap-2">
-                  <svg class="w-3.5 h-3.5 text-amber-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-                    <path fill-rule="evenodd" clip-rule="evenodd"
-                      d="M9.401 3.003c1.155-2 4.043-2 5.197 0l7.355 12.748c1.154 2-.29 4.5-2.599
-                         4.5H4.645c-2.309 0-3.752-2.5-2.598-4.5L9.4 3.003zM12 8.25a.75.75 0 01.75.75v3.75a.75.75
-                         0 01-1.5 0V9a.75.75 0 01.75-.75zm0 8.25a.75.75 0 100-1.5.75.75 0 000 1.5z"/>
-                  </svg>
-                  <span class="text-xs text-amber-400 font-medium">Wrong account?</span>
-                </div>
-                <p class="text-[11px] text-base-content/50 pl-5">{domainCheck.detail}</p>
-                <div class="pl-5">
-                  <button class="btn btn-ghost btn-xs text-amber-400/70 hover:text-amber-400 px-0"
-                          onclick={authorize}>
-                    Re-authorize with correct account →
-                  </button>
-                </div>
-              </div>
-            {/if}
-
-            <div class="flex justify-end">
-              <!-- Block Continue only when we're CERTAIN the domain is wrong -->
-              <button class="btn btn-primary btn-sm" onclick={save}
-                      disabled={saving || domainCheck === null || (domainCheck.certain && !domainCheck.ok)}>
-                {#if saving}<span class="loading loading-spinner loading-xs"></span>{/if}
-                {domainCheck === null ? 'Verifying…' : 'Continue'}
+              <p class="text-sm font-mono font-semibold text-emerald-400 pl-5">{discovered.zone}</p>
+              {#if discovered.all.length > 1}
+                <p class="text-[10px] text-base-content/35 pl-5">
+                  +{discovered.all.length - 1} more zone{discovered.all.length > 2 ? 's' : ''} on this account
+                </p>
+              {/if}
+            </div>
+            <div class="flex justify-end gap-2">
+              <button class="btn btn-ghost btn-sm text-base-content/50" onclick={authorize}>
+                Not right? Re-authorize
               </button>
+              <button class="btn btn-primary btn-sm" onclick={commitBrowser}>Continue</button>
             </div>
 
           {:else}
             <!-- Not yet authorized -->
             <div class="flex items-center gap-3 rounded-lg bg-base-300/50 border border-base-300 px-3 py-2.5">
-              <span class="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0"></span>
-              <span class="text-xs text-base-content/50 flex-1">Not yet authorized</span>
+              <span class="w-2 h-2 rounded-full {cfAuthorized ? 'bg-emerald-400' : 'bg-amber-400'} flex-shrink-0"></span>
+              <span class="text-xs text-base-content/50 flex-1">
+                {cfAuthorized ? 'Cert present — confirm the domain' : 'Not yet authorized'}
+              </span>
               <button class="btn btn-xs btn-primary" onclick={authorize}>
-                Authorize with Cloudflare
+                {cfAuthorized ? 'Detect domain' : 'Authorize with Cloudflare'}
               </button>
             </div>
-            {#if store.status === 'failed'}
-              <!-- Previous attempt failed — offer retry -->
-              <div class="flex items-center justify-between">
-                <span class="text-[11px] text-red-400/80">Authorization failed — check the log below.</span>
-                <button class="btn btn-ghost btn-xs text-base-content/50" onclick={authorize}>
-                  Try again
-                </button>
+            {#if errorMsg}
+              <div class="rounded-lg bg-red-400/8 border border-red-400/25 px-3 py-2">
+                <p class="text-[11px] text-red-400">{errorMsg}</p>
               </div>
             {/if}
           {/if}
 
           <p class="text-[11px] text-base-content/35">
-            Opens a browser window to log in to Cloudflare. No API token required.
+            Opens a browser window to log in to Cloudflare. The domain is detected from your login.
           </p>
         {/if}
 
@@ -308,7 +293,7 @@
       <button
         class="btn btn-ghost btn-xs text-red-400/50 hover:text-red-400 hover:bg-red-400/10"
         onclick={deleteProject}
-        disabled={store.busy}
+        disabled={store.busy || working}
       >
         <svg class="w-3 h-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
           <path fill-rule="evenodd" clip-rule="evenodd"

@@ -27,16 +27,32 @@
   const authBadge = $derived(
     project.auth_mode === 'token' ? 'API token' : 'cloudflared'
   );
+
+  // Return to AuthSetup to re-authenticate (browser projects only)
+  async function reauth() {
+    const updated = { ...project, browser_authed: false };
+    await api.upsertProject(updated);
+    store.upsertProject(updated);
+  }
 </script>
 
 <div class="flex-1 overflow-y-auto p-5 space-y-3">
   <!-- Project header -->
   <div class="flex items-center justify-between">
     <div>
-      <h2 class="text-sm font-semibold">{project.domain}</h2>
+      <h2 class="text-sm font-semibold">{project.name || project.domain}</h2>
       <div class="flex items-center gap-1.5 mt-0.5">
         <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+        {#if project.domain}
+          <span class="text-[11px] font-mono text-base-content/50">{project.domain}</span>
+          <span class="text-base-content/20">·</span>
+        {/if}
         <span class="text-[11px] text-base-content/40">{authBadge}</span>
+        {#if project.auth_mode === 'browser'}
+          <span class="text-base-content/20">·</span>
+          <button class="text-[11px] text-base-content/30 hover:text-base-content/60 transition-colors"
+                  onclick={reauth} disabled={store.busy}>re-auth</button>
+        {/if}
       </div>
     </div>
     <div class="flex items-center gap-2">

@@ -34,6 +34,7 @@
     down:     'bg-red-400',
     inactive: 'bg-zinc-500',
     unknown:  'bg-zinc-600',
+    active:   'bg-emerald-400',
   };
   const dot = $derived(statusDot[tunnel.status] ?? 'bg-zinc-600');
 </script>

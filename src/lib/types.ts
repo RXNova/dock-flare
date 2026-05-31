@@ -1,10 +1,16 @@
 export interface Project {
   id: string;
-  domain: string;
+  name: string;            // user label, set at creation
+  domain: string;          // auto-discovered zone; empty until authed
   auth_mode: 'token' | 'browser';
   api_token: string;
   account_id: string;
   browser_authed: boolean;
+}
+
+export interface ZoneInfo {
+  zone: string;            // primary zone = the project's domain
+  all: string[];           // all reachable zones (token mode may have several)
 }
 
 export interface TunnelInfo {
@@ -19,6 +25,7 @@ export interface TunnelInfo {
 export interface TunnelConfig {
   tunnel_name: string;
   public_hostname: string;
+  target_type: 'k8s' | 'local';
   k8s_namespace: string;
   internal_service: string;
 }

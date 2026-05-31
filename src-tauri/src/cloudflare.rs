@@ -32,6 +32,7 @@ pub struct CfTunnel {
 #[derive(Deserialize)]
 pub struct CfZone {
     pub id: String,
+    pub name: String,
 }
 
 #[derive(Deserialize)]
@@ -210,6 +211,49 @@ pub async fn delete_tunnel(
 }
 
 // ── DNS ───────────────────────────────────────────────────────────────────────
+
+/// List all zones the API token can access (optionally scoped to an account).
+pub async fn list_zones(
+    client: &Client,
+    api_token: &str,
+    account_id: &str,
+) -> Result<Vec<CfZone>, String> {
+    let mut req = client
+        .get("https://api.cloudflare.com/client/v4/zones")
+        .bearer_auth(api_token)
+        .query(&[("per_page", "50")]);
+    if !account_id.is_empty() {
+        req = req.query(&[("account.id", account_id)]);
+    }
+    let body: CfResp<Vec<CfZone>> = req
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !body.success {
+        return Err(format!("Zone list error: {:?}", body.errors));
+    }
+    Ok(body.result.unwrap_or_default())
+}
+
+pub async fn get_zone_by_id(
+    client: &Client,
+    api_token: &str,
+    zone_id: &str,
+) -> Result<CfZone, String> {
+    client
+        .get(format!("https://api.cloudflare.com/client/v4/zones/{}", zone_id))
+        .bearer_auth(api_token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json::<CfResp<CfZone>>()
+        .await
+        .map_err(|e| e.to_string())?
+        .into_result()
+}
 
 pub fn extract_zone(domain: &str) -> String {
     let parts: Vec<&str> = domain.split('.').collect();

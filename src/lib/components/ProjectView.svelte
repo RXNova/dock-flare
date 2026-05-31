@@ -11,8 +11,8 @@
       : p.browser_authed === true;
   }
 
-  let project    = $derived(store.selectedProject);
-  let authed     = $derived(project ? isAuthenticated(project) : false);
+  let project = $derived(store.selectedProject);
+  let authed  = $derived(project ? isAuthenticated(project) : false);
 </script>
 
 <div class="flex-1 flex flex-col min-h-0">

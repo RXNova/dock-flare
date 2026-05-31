@@ -17,6 +17,7 @@ export default defineConfig(async () => ({
     port: 1420,
     strictPort: true,
     host: host || false,
+    allowedHosts: true, // Allow all hosts to support tunnelling
     hmr: host
       ? {
           protocol: "ws",

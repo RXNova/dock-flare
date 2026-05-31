@@ -1,5 +1,6 @@
 use serde::Serialize;
 use tauri::AppHandle;
+use base64::Engine as _;
 
 use crate::cloudflare;
 use crate::config::{self, Project, TunnelConfig};
@@ -152,80 +153,61 @@ pub async fn teardown_tunnel(
 
 // ── cloudflared helpers ───────────────────────────────────────────────────────
 
-/// After browser login, check the saved cert actually covers the project's domain.
-/// Strategy: ask cloudflared to route DNS for a dummy tunnel on that hostname.
-///   - "tunnel not found" error  → zone IS accessible by this cert  ✓
-///   - "zone not found" / "unauthorized" error → cert is for a different account  ✗
+/// Parse the ARGO TUNNEL TOKEN from a cert.pem file.
+/// Returns (zone_id, account_id, api_token) or None if the format is unrecognised.
+fn parse_argo_token(cert_path: &std::path::PathBuf) -> Option<(String, String, String)> {
+    let content = std::fs::read_to_string(cert_path).ok()?;
+    let start = content.find("-----BEGIN ARGO TUNNEL TOKEN-----")?
+        + "-----BEGIN ARGO TUNNEL TOKEN-----".len();
+    let end = content.find("-----END ARGO TUNNEL TOKEN-----")?;
+    let b64: String = content[start..end].split_whitespace().collect();
+    let decoded = base64::engine::general_purpose::STANDARD.decode(&b64).ok()?;
+    let json: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
+    let zone_id    = json["zoneID"].as_str()?.to_string();
+    let account_id = json["accountID"].as_str()?.to_string();
+    let api_token  = json["apiToken"].as_str()?.to_string();
+    Some((zone_id, account_id, api_token))
+}
+
+/// Discover the Cloudflare zone(s) this project is authorized for.
+///
+/// - Browser mode: the cert.pem holds an ARGO TUNNEL TOKEN block — base64 JSON
+///   `{ "zoneID", "accountID", "apiToken" }`. We resolve zoneID → zone name.
+/// - Token mode: list the zones the API token can access.
+///
+/// The discovered zone becomes the project's domain — the user never types it.
 #[tauri::command]
-pub async fn verify_domain_auth(
-    app: AppHandle,
-    project_id: String,
-    domain: String,
-) -> Result<DomainAuthResult, String> {
-    let cert = orchestrate::project_cert_path(&project_id);
-    if !cert.exists() {
-        return Ok(DomainAuthResult { ok: false, certain: true, detail: "No cert found for this project.".into() });
-    }
-    let cert_str = cert.to_str().unwrap().to_string();
+pub async fn discover_zone(project: Project) -> Result<ZoneInfo, String> {
+    let client = reqwest::Client::new();
 
-    orchestrate::emit(&app, &format!("  -> Verifying cert covers '{}'…", domain));
-
-    // 10-second timeout — kills the child if cloudflared hangs
-    let result = orchestrate::run_silent_timeout("cloudflared", &[
-        "--origincert", &cert_str,
-        "tunnel", "route", "dns",
-        "dockflare-verify-000", &domain,
-    ], 10).await;
-
-    match result {
-        Ok(_) => Ok(DomainAuthResult {
-            ok: true,
-            certain: true,
-            detail: format!("Domain '{}' is accessible.", domain),
-        }),
-        Err(e) if e == "timeout" => Ok(DomainAuthResult {
-            ok: true,   // inconclusive — don't block the user
-            certain: false,
-            detail: "Verification timed out. You can still continue; if the domain is wrong you'll see an error at deploy time.".into(),
-        }),
-        Err(e) => {
-            let lower = e.to_lowercase();
-            if lower.contains("not found") || lower.contains("does not exist") || lower.contains("no tunnel") {
-                // Tunnel unknown but zone is reachable — cert covers this domain ✓
-                Ok(DomainAuthResult {
-                    ok: true,
-                    certain: true,
-                    detail: format!("Domain '{}' is accessible with this cert.", domain),
-                })
-            } else if lower.contains("zone") || lower.contains("unauthorized")
-                   || lower.contains("forbidden") || lower.contains("invalid")
-            {
-                // Zone/auth error — cert is for a different account ✗
-                Ok(DomainAuthResult {
-                    ok: false,
-                    certain: true,
-                    detail: format!(
-                        "This cert doesn't cover '{}'. You likely authorized the wrong Cloudflare account.",
-                        domain
-                    ),
-                })
-            } else {
-                // Unknown error — inconclusive, let user decide
-                Ok(DomainAuthResult {
-                    ok: true,
-                    certain: false,
-                    detail: format!("Could not verify ({}). You can continue — a deploy will confirm access.", e),
-                })
-            }
+    if project.auth_mode == "browser" {
+        let cert = orchestrate::project_cert_path(&project.id);
+        if !cert.exists() {
+            return Err("No cert found — authorize this project first.".into());
         }
+        let (zone_id, _account_id, api_token) = parse_argo_token(&cert)
+            .ok_or("Could not read the cert credentials. Re-authorize.")?;
+        let zone = cloudflare::get_zone_by_id(&client, &api_token, &zone_id).await?;
+        Ok(ZoneInfo { zone: zone.name.clone(), all: vec![zone.name] })
+    } else {
+        if project.api_token.is_empty() {
+            return Err("No API token set.".into());
+        }
+        let zones = cloudflare::list_zones(&client, &project.api_token, &project.account_id).await?;
+        let all: Vec<String> = zones.into_iter().map(|z| z.name).collect();
+        if all.is_empty() {
+            return Err("This API token has no accessible zones.".into());
+        }
+        Ok(ZoneInfo { zone: all[0].clone(), all })
     }
 }
 
 #[derive(serde::Serialize)]
-pub struct DomainAuthResult {
-    pub ok: bool,
-    pub certain: bool, // false = inconclusive (timeout / unknown error)
-    pub detail: String,
+pub struct ZoneInfo {
+    /// Primary zone (the project's domain).
+    pub zone: String,
+    /// All zones reachable with this credential (token mode may have several).
+    pub all: Vec<String>,
 }
 
 #[tauri::command]

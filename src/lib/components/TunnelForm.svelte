@@ -6,21 +6,27 @@
 
   let { onSuccess, onCancel }: { onSuccess: () => void; onCancel: () => void } = $props();
 
+  let subdomain = $state('');
+
   let form = $state<TunnelConfig>({
     tunnel_name:     '',
     public_hostname: '',
+    target_type:     'local',
     k8s_namespace:   'default',
     internal_service:'',
   });
 
-  const hostnameErr = $derived(domainError(form.public_hostname));
+  const fullHostname = $derived(subdomain ? `${subdomain}.${store.selectedProject?.domain}` : store.selectedProject?.domain || '');
+  const hostnameErr = $derived(domainError(fullHostname));
+  
   const ready       = $derived(
-    !!(form.tunnel_name && form.public_hostname && !hostnameErr
-       && form.k8s_namespace && form.internal_service)
+    !!(form.tunnel_name && subdomain && !hostnameErr
+       && form.internal_service && (form.target_type === 'local' || form.k8s_namespace))
   );
 
   async function deploy() {
     const project = store.selectedProject!;
+    form.public_hostname = fullHostname;
     store.status = 'processing';
     store.clearLogs();
     try {
@@ -59,32 +65,51 @@
       </div>
 
       <div class="space-y-1.5">
-        <div class="flex items-baseline justify-between">
-          <p class="text-xs font-medium text-base-content/50">Public Hostname</p>
+        <div class="flex items-baseline justify-between mb-1.5">
+          <p class="text-xs font-medium text-base-content/50">Subdomain</p>
           {#if hostnameErr}
             <span class="text-[10px] text-red-400">{hostnameErr}</span>
           {/if}
         </div>
-        <input type="text" placeholder="app.example.com"
-          bind:value={form.public_hostname} disabled={store.busy}
-          class="input input-sm w-full bg-base-100
-                 focus:outline-none focus:ring-2
-                 {hostnameErr
-                   ? 'border-red-500 focus:ring-red-500/25'
-                   : 'border-base-300 focus:ring-primary/25 focus:border-primary/50'}" />
+        <div class="flex items-center">
+          <input type="text" placeholder="app"
+            bind:value={subdomain} disabled={store.busy}
+            class="input input-sm w-full bg-base-100 rounded-r-none border-r-0
+                   focus:outline-none focus:ring-2 focus:z-10
+                   {hostnameErr
+                     ? 'border-red-500 focus:ring-red-500/25'
+                     : 'border-base-300 focus:ring-primary/25 focus:border-primary/50'}" />
+          <div class="px-3 bg-base-200 border border-base-300 rounded-r-lg h-8 flex items-center text-xs text-base-content/50 whitespace-nowrap">
+            .{store.selectedProject?.domain}
+          </div>
+        </div>
       </div>
 
       <div class="space-y-1.5">
-        <p class="text-xs font-medium text-base-content/50">K8s Namespace</p>
-        <input type="text" placeholder="default"
-          bind:value={form.k8s_namespace} disabled={store.busy}
-          class="input input-sm w-full bg-base-100 border-base-300
-                 focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/50" />
+        <p class="text-xs font-medium text-base-content/50">Target Strategy</p>
+        <select
+          bind:value={form.target_type} disabled={store.busy}
+          class="select select-sm w-full bg-base-100 border-base-300
+                 focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/50"
+        >
+          <option value="local">Local Webserver</option>
+          <option value="k8s">Kubernetes</option>
+        </select>
       </div>
+
+      {#if form.target_type === 'k8s'}
+        <div class="space-y-1.5">
+          <p class="text-xs font-medium text-base-content/50">K8s Namespace</p>
+          <input type="text" placeholder="default"
+            bind:value={form.k8s_namespace} disabled={store.busy}
+            class="input input-sm w-full bg-base-100 border-base-300
+                   focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/50" />
+        </div>
+      {/if}
 
       <div class="space-y-1.5">
         <p class="text-xs font-medium text-base-content/50">Internal Service</p>
-        <input type="text" placeholder="http://svc:8080"
+        <input type="text" placeholder={form.target_type === 'local' ? "http://localhost:3000" : "http://svc:8080"}
           bind:value={form.internal_service} disabled={store.busy}
           class="input input-sm w-full bg-base-100 border-base-300 font-mono text-[11px]
                  focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/50" />

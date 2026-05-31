@@ -18,7 +18,7 @@ pub fn run() {
             commands::check_cf_auth,
             commands::install_cloudflared,
             commands::cloudflared_login,
-            commands::verify_domain_auth,
+            commands::discover_zone,
             commands::cancel_login,
             commands::open_url,
         ])

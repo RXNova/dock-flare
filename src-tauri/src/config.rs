@@ -5,6 +5,12 @@ use tauri::Manager;
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Project {
     pub id: String,
+    /// User-chosen label for the project (e.g. "Production"). Required at creation.
+    #[serde(default)]
+    pub name: String,
+    /// Cloudflare zone, auto-discovered from the cert (browser) or API token (token).
+    /// Empty until authentication completes.
+    #[serde(default)]
     pub domain: String,
     pub auth_mode: String, // "token" | "browser"
     #[serde(default)]
@@ -31,8 +37,7 @@ pub struct TunnelMeta {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TunnelConfig {
     pub tunnel_name: String,
-    pub public_hostname: String,
-    pub k8s_namespace: String,
+    pub public_hostname: String,    pub target_type: String,    pub k8s_namespace: String,
     pub internal_service: String,
 }
 

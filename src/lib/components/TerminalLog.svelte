@@ -26,32 +26,32 @@
   }
 </script>
 
-<div class="flex-shrink-0 border-t border-zinc-800 bg-zinc-950">
-  <div class="flex items-center gap-2 px-3 py-2 border-b border-zinc-800/60">
-    <span class="w-2.5 h-2.5 rounded-full bg-zinc-700"></span>
-    <span class="w-2.5 h-2.5 rounded-full bg-zinc-700"></span>
-    <span class="w-2.5 h-2.5 rounded-full bg-zinc-700"></span>
-    <span class="ml-2 text-[10px] font-mono text-zinc-500">deployment log</span>
+<div class="flex-shrink-0 border-t border-base-300 bg-base-100">
+  <div class="flex items-center gap-2 px-3 py-2 border-b border-base-300 bg-base-200/50">
+    <span class="w-2.5 h-2.5 rounded-full bg-base-content/20"></span>
+    <span class="w-2.5 h-2.5 rounded-full bg-base-content/20"></span>
+    <span class="w-2.5 h-2.5 rounded-full bg-base-content/20"></span>
+    <span class="ml-2 text-[10px] font-mono text-base-content/50">deployment log</span>
     {#if store.logs.length > 0}
       <button
-        class="ml-auto text-[10px] text-zinc-600 hover:text-zinc-300 transition-colors"
+        class="ml-auto text-[10px] text-base-content/50 hover:text-base-content transition-colors"
         onclick={() => store.clearLogs()}
       >clear</button>
     {/if}
   </div>
   <div
-    class="p-3 h-36 overflow-y-auto font-mono text-[11px] leading-[1.6] select-text cursor-text"
+    class="p-3 h-36 overflow-y-auto font-mono text-[11px] leading-[1.6] select-text cursor-text bg-base-100"
     bind:this={logEl}
   >
     {#if store.logs.length === 0}
-      <span class="text-zinc-500">ready</span><span class="text-zinc-500 cursor-blink">█</span>
+      <span class="text-base-content/50">ready</span><span class="text-base-content/50 cursor-blink">█</span>
     {:else}
       {#each store.logs as line}
         <div class={lineStyle(line)}>
           {#each segments(line) as seg}
             {#if seg.url}
               <button
-                class="underline decoration-dotted hover:decoration-solid text-sky-400 hover:text-sky-300
+                class="underline decoration-dotted hover:decoration-solid text-info hover:text-info-content
                        cursor-pointer transition-colors"
                 onclick={() => api.openUrl(seg.url!)}
                 title="Click to open in browser"

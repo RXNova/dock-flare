@@ -1,13 +1,13 @@
 import type { AppStatus } from './types';
 
 export function lineStyle(line: string): string {
-  if (/error|fatal/i.test(line))         return 'text-red-400';
-  if (line.startsWith('==='))            return 'text-white font-semibold';
-  if (/^\[\d+\/\d+\]/.test(line))        return 'text-sky-400';
+  if (/error|fatal/i.test(line))         return 'text-error font-medium';
+  if (line.startsWith('==='))            return 'text-base-content font-bold';
+  if (/^\[\d+\/\d+\]/.test(line))        return 'text-info';
   if (/complete|success|\bOK\b|found|acquired|written|deployed/i.test(line))
-                                         return 'text-emerald-400';
-  if (line.trimStart().startsWith('->')) return 'text-zinc-300';
-  return 'text-zinc-200';
+                                         return 'text-success';
+  if (line.trimStart().startsWith('->')) return 'text-base-content/60';
+  return 'text-base-content/80';
 }
 
 export const statusCfg: Record<AppStatus, { dot: string; label: string; text: string }> = {
