@@ -8,7 +8,8 @@
   let authMode     = $state<'token' | 'browser'>('token');
   let apiToken     = $state('');
   let accountId    = $state('');
-  let cancelled    = $state(false); // distinguish cancel from error
+  let cancelled    = $state(false);
+  let domainCheck  = $state<{ ok: boolean; detail: string } | null>(null);
 
   // Sync when project changes; verify per-project cert on disk
   $effect(() => {
@@ -17,8 +18,12 @@
       accountId    = project.account_id ?? '';
       authMode     = project.auth_mode as 'token' | 'browser';
       cfAuthorized = project.browser_authed ?? false;
+      domainCheck  = null;
       if (project.auth_mode === 'browser') {
-        api.checkCfAuth(project.id).then(v => { cfAuthorized = v; });
+        api.checkCfAuth(project.id).then(v => {
+          cfAuthorized = v;
+          if (v) api.verifyDomainAuth(project.id, project.domain).then(r => { domainCheck = r; });
+        });
       }
     }
   });
@@ -42,6 +47,9 @@
       const updated = { ...project, auth_mode: 'browser' as const, browser_authed: true };
       await api.upsertProject(updated);
       store.upsertProject(updated);
+      // Verify the cert actually covers this project's domain
+      domainCheck = null;
+      domainCheck = await api.verifyDomainAuth(project.id, project.domain);
     } catch (e) {
       if (cancelled) {
         store.status = 'idle'; // user chose to cancel — not an error
@@ -207,8 +215,47 @@
                 Reopen browser
               </button>
             </div>
+
+            <!-- Domain verification result -->
+            {#if domainCheck === null}
+              <div class="flex items-center gap-2 text-[11px] text-base-content/30">
+                <span class="loading loading-spinner loading-xs"></span>
+                Verifying access to <span class="font-mono">{project.domain}</span>…
+              </div>
+            {:else if domainCheck.ok}
+              <div class="flex items-center gap-2 rounded-lg bg-emerald-400/8 border border-emerald-400/20 px-3 py-2">
+                <svg class="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                  <path fill-rule="evenodd" clip-rule="evenodd"
+                    d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75
+                       9.75S2.25 17.385 2.25 12zm13.36-1.814a.75.75 0 10-1.22-.872l-3.236 4.53L9.53
+                       12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z"/>
+                </svg>
+                <span class="text-xs text-emerald-400">Cert covers <span class="font-mono font-medium">{project.domain}</span></span>
+              </div>
+            {:else}
+              <div class="rounded-lg bg-amber-400/8 border border-amber-400/25 px-3 py-2.5 space-y-1.5">
+                <div class="flex items-center gap-2">
+                  <svg class="w-3.5 h-3.5 text-amber-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                    <path fill-rule="evenodd" clip-rule="evenodd"
+                      d="M9.401 3.003c1.155-2 4.043-2 5.197 0l7.355 12.748c1.154 2-.29 4.5-2.599
+                         4.5H4.645c-2.309 0-3.752-2.5-2.598-4.5L9.4 3.003zM12 8.25a.75.75 0 01.75.75v3.75a.75.75
+                         0 01-1.5 0V9a.75.75 0 01.75-.75zm0 8.25a.75.75 0 100-1.5.75.75 0 000 1.5z"/>
+                  </svg>
+                  <span class="text-xs text-amber-400 font-medium">Wrong account?</span>
+                </div>
+                <p class="text-[11px] text-base-content/50 pl-5">{domainCheck.detail}</p>
+                <div class="pl-5">
+                  <button class="btn btn-ghost btn-xs text-amber-400/70 hover:text-amber-400 px-0"
+                          onclick={authorize}>
+                    Re-authorize with correct account →
+                  </button>
+                </div>
+              </div>
+            {/if}
+
             <div class="flex justify-end">
-              <button class="btn btn-primary btn-sm" onclick={save} disabled={saving}>
+              <button class="btn btn-primary btn-sm" onclick={save}
+                      disabled={saving || domainCheck === null || !domainCheck.ok}>
                 {#if saving}<span class="loading loading-spinner loading-xs"></span>{/if}
                 Continue
               </button>

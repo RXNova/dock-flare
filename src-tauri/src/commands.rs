@@ -152,6 +152,67 @@ pub async fn teardown_tunnel(
 
 // ── cloudflared helpers ───────────────────────────────────────────────────────
 
+/// After browser login, check the saved cert actually covers the project's domain.
+/// Strategy: ask cloudflared to route DNS for a dummy tunnel on that hostname.
+///   - "tunnel not found" error  → zone IS accessible by this cert  ✓
+///   - "zone not found" / "unauthorized" error → cert is for a different account  ✗
+#[tauri::command]
+pub async fn verify_domain_auth(
+    app: AppHandle,
+    project_id: String,
+    domain: String,
+) -> Result<DomainAuthResult, String> {
+    let cert = orchestrate::project_cert_path(&project_id);
+    if !cert.exists() {
+        return Ok(DomainAuthResult { ok: false, detail: "No cert found for this project.".into() });
+    }
+    let cert_str = cert.to_str().unwrap().to_string();
+
+    orchestrate::emit(&app, &format!("  -> Verifying cert covers '{}'…", domain));
+
+    let result = orchestrate::run_silent("cloudflared", &[
+        "--origincert", &cert_str,
+        "tunnel", "route", "dns",
+        "dockflare-verify-000", &domain,
+    ]).await;
+
+    match result {
+        Ok(_) => Ok(DomainAuthResult { ok: true, detail: format!("Domain '{}' is accessible.", domain) }),
+        Err(e) => {
+            let lower = e.to_lowercase();
+            // "not found" / "does not exist" → tunnel missing but zone IS reachable
+            if lower.contains("not found") || lower.contains("does not exist") || lower.contains("no tunnel") {
+                Ok(DomainAuthResult {
+                    ok: true,
+                    detail: format!("Domain '{}' is accessible with this cert.", domain),
+                })
+            // zone / auth errors → wrong account
+            } else if lower.contains("zone") || lower.contains("unauthorized")
+                   || lower.contains("forbidden") || lower.contains("invalid") {
+                Ok(DomainAuthResult {
+                    ok: false,
+                    detail: format!(
+                        "This cert doesn't cover '{}'. You may have authorized the wrong Cloudflare account.",
+                        domain
+                    ),
+                })
+            } else {
+                // Unknown error — surface it but don't block the user
+                Ok(DomainAuthResult {
+                    ok: false,
+                    detail: format!("Could not verify domain: {}", e),
+                })
+            }
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+pub struct DomainAuthResult {
+    pub ok: bool,
+    pub detail: String,
+}
+
 #[tauri::command]
 pub async fn cancel_login(app: AppHandle) -> Result<(), String> {
     // Kill the cloudflared process that is sitting in "Waiting for login..."

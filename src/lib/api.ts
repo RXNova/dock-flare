@@ -21,6 +21,8 @@ export const api = {
   checkCloudflared:   ()                   => invoke<boolean>('check_cloudflared'),
   checkCfAuth:        (projectId: string)  => invoke<boolean>('check_cf_auth', { projectId }),
   cloudflaredLogin:   (projectId: string)  => invoke<void>('cloudflared_login', { projectId }),
+  verifyDomainAuth:   (projectId: string, domain: string) =>
+    invoke<{ ok: boolean; detail: string }>('verify_domain_auth', { projectId, domain }),
   cancelLogin:        ()                   => invoke<void>('cancel_login'),
   installCloudflared: ()                   => invoke<void>('install_cloudflared'),
   openUrl:            (url: string)        => invoke<void>('open_url', { url }),
