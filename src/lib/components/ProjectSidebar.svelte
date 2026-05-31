@@ -3,9 +3,11 @@
   import { api } from '$lib/api';
   import type { Project } from '$lib/types';
 
-  let showAdd  = $state(false);
-  let newName  = $state('');
-  let adding   = $state(false);
+  let showAdd    = $state(false);
+  let newName    = $state('');
+  let adding     = $state(false);
+  let renamingId = $state<string | null>(null);
+  let renameVal  = $state('');
 
   function isAuthenticated(p: Project): boolean {
     return p.auth_mode === 'token'
@@ -38,6 +40,21 @@
     e.stopPropagation();
     await api.deleteProject(id);
     store.removeProject(id);
+  }
+
+  function startRename(e: MouseEvent, p: Project) {
+    e.stopPropagation();
+    renamingId = p.id;
+    renameVal  = p.name;
+  }
+
+  async function commitRename(p: Project) {
+    const trimmed = renameVal.trim();
+    renamingId = null;
+    if (!trimmed || trimmed === p.name) return;
+    const updated = { ...p, name: trimmed };
+    await api.upsertProject(updated);
+    store.upsertProject(updated);
   }
 </script>
 
@@ -108,31 +125,57 @@
         <!-- Auth status dot -->
         <span class="w-2 h-2 rounded-full flex-shrink-0 {authed ? 'bg-emerald-400' : 'bg-amber-400'}"></span>
 
-        <!-- Name + discovered domain -->
-        <span class="flex-1 min-w-0">
-          <span class="block text-xs font-medium truncate
-                       {store.selectedId === p.id ? 'text-base-content' : 'text-base-content/70'}">
-            {p.name || 'Untitled'}
+        <!-- Name + discovered domain (or inline rename input) -->
+        {#if renamingId === p.id}
+          <input
+            type="text"
+            bind:value={renameVal}
+            onkeydown={(e) => { if (e.key === 'Enter') commitRename(p); else if (e.key === 'Escape') renamingId = null; }}
+            onblur={() => commitRename(p)}
+            onclick={(e) => e.stopPropagation()}
+            class="flex-1 min-w-0 input input-xs bg-base-100 border-base-300 text-xs font-medium
+                   focus:outline-none focus:ring-1 focus:ring-primary/40"
+          />
+        {:else}
+          <span class="flex-1 min-w-0">
+            <span class="block text-xs font-medium truncate
+                         {store.selectedId === p.id ? 'text-base-content' : 'text-base-content/70'}">
+              {p.name || 'Untitled'}
+            </span>
+            {#if p.domain}
+              <span class="block text-[10px] text-base-content/35 font-mono truncate">{p.domain}</span>
+            {/if}
           </span>
-          {#if p.domain}
-            <span class="block text-[10px] text-base-content/35 font-mono truncate">{p.domain}</span>
-          {/if}
-        </span>
 
-        <!-- Remove -->
-        <button
-          class="w-4 h-4 rounded flex items-center justify-center text-base-content/20
-                 hover:text-red-400 hover:bg-red-400/10 opacity-0 group-hover:opacity-100 transition-all"
-          onclick={(e) => removeProject(e, p.id)}
-          title="Remove project"
-        >
-          <svg class="w-2.5 h-2.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-            <path fill-rule="evenodd" clip-rule="evenodd"
-              d="M5.47 5.47a.75.75 0 011.06 0L12 10.94l5.47-5.47a.75.75 0 111.06 1.06L13.06 12l5.47
-                 5.47a.75.75 0 11-1.06 1.06L12 13.06l-5.47 5.47a.75.75 0 01-1.06-1.06L10.94 12 5.47
-                 6.53a.75.75 0 010-1.06z"/>
-          </svg>
-        </button>
+          <!-- Rename -->
+          <button
+            class="w-4 h-4 rounded flex items-center justify-center text-base-content/20
+                   hover:text-base-content/60 hover:bg-base-300 opacity-0 group-hover:opacity-100 transition-all"
+            onclick={(e) => startRename(e, p)}
+            title="Rename project"
+          >
+            <svg class="w-2.5 h-2.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M21.731 2.269a2.625 2.625 0 00-3.712 0l-1.157 1.157 3.712 3.712 1.157-1.157a2.625
+                       2.625 0 000-3.712zM19.513 8.199l-3.712-3.712-8.4 8.4a5.25 5.25 0 00-1.32 2.214l-.8
+                       2.685a.75.75 0 00.933.933l2.685-.8a5.25 5.25 0 002.214-1.32l8.4-8.4z"/>
+            </svg>
+          </button>
+
+          <!-- Remove -->
+          <button
+            class="w-4 h-4 rounded flex items-center justify-center text-base-content/20
+                   hover:text-red-400 hover:bg-red-400/10 opacity-0 group-hover:opacity-100 transition-all"
+            onclick={(e) => removeProject(e, p.id)}
+            title="Remove project"
+          >
+            <svg class="w-2.5 h-2.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+              <path fill-rule="evenodd" clip-rule="evenodd"
+                d="M5.47 5.47a.75.75 0 011.06 0L12 10.94l5.47-5.47a.75.75 0 111.06 1.06L13.06 12l5.47
+                   5.47a.75.75 0 11-1.06 1.06L12 13.06l-5.47 5.47a.75.75 0 01-1.06-1.06L10.94 12 5.47
+                   6.53a.75.75 0 010-1.06z"/>
+            </svg>
+          </button>
+        {/if}
       </div>
     {:else}
       <p class="px-2 py-3 text-xs text-base-content/30 text-center">
