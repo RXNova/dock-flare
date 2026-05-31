@@ -32,6 +32,10 @@ pub struct TunnelMeta {
     pub hostname: String,
     pub service: String,
     pub namespace: String,
+    #[serde(default)]
+    pub target_type: String, // "local" | "k8s"
+    #[serde(default)]
+    pub pid: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -50,10 +54,21 @@ fn config_path(app: &tauri::AppHandle) -> PathBuf {
 
 pub fn load(app: &tauri::AppHandle) -> Vec<Project> {
     let path = config_path(app);
-    std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    let s = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+    match serde_json::from_str(&s) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!(
+                "WARNING: projects.json is corrupted ({}). Starting with no projects. \
+                 Back up and delete {} to recover.",
+                e, path.display()
+            );
+            vec![]
+        }
+    }
 }
 
 pub fn save(app: &tauri::AppHandle, projects: &[Project]) {

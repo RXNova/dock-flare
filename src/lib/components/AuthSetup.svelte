@@ -95,6 +95,18 @@
     store.clearLogs();
   }
 
+  async function retryDiscover() {
+    working = true;
+    errorMsg = null;
+    try {
+      discovered = await api.discoverZone({ ...project, auth_mode: 'browser' });
+    } catch (e) {
+      errorMsg = String(e);
+    } finally {
+      working = false;
+    }
+  }
+
   async function installCloudflared() {
     store.status = 'processing';
     store.clearLogs();
@@ -262,19 +274,31 @@
             </div>
 
           {:else}
-            <!-- Not yet authorized -->
+            <!-- Not yet authorized / cert present -->
             <div class="flex items-center gap-3 rounded-lg bg-base-300/50 border border-base-300 px-3 py-2.5">
               <span class="w-2 h-2 rounded-full {cfAuthorized ? 'bg-emerald-400' : 'bg-amber-400'} flex-shrink-0"></span>
               <span class="text-xs text-base-content/50 flex-1">
-                {cfAuthorized ? 'Cert present — confirm the domain' : 'Not yet authorized'}
+                {cfAuthorized ? 'Cert present — detect domain' : 'Not yet authorized'}
               </span>
-              <button class="btn btn-xs btn-primary" onclick={authorize}>
-                {cfAuthorized ? 'Detect domain' : 'Authorize with Cloudflare'}
-              </button>
+              {#if cfAuthorized}
+                <button class="btn btn-xs btn-primary" onclick={retryDiscover}>
+                  Detect domain
+                </button>
+              {:else}
+                <button class="btn btn-xs btn-primary" onclick={authorize}>
+                  Authorize with Cloudflare
+                </button>
+              {/if}
             </div>
             {#if errorMsg}
-              <div class="rounded-lg bg-red-400/8 border border-red-400/25 px-3 py-2">
+              <div class="rounded-lg bg-red-400/8 border border-red-400/25 px-3 py-2 space-y-2">
                 <p class="text-[11px] text-red-400">{errorMsg}</p>
+                {#if cfAuthorized}
+                  <button class="text-[10px] text-base-content/40 hover:text-base-content/60 underline"
+                          onclick={authorize}>
+                    Re-authorize with Cloudflare instead
+                  </button>
+                {/if}
               </div>
             {/if}
           {/if}

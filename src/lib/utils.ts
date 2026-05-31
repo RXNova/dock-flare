@@ -3,7 +3,7 @@ import type { AppStatus } from './types';
 export function lineStyle(line: string): string {
   if (/error|fatal/i.test(line))         return 'text-error font-medium';
   if (line.startsWith('==='))            return 'text-base-content font-bold';
-  if (/^\[\d+\/\d+\]/.test(line))        return 'text-info';
+  if (/\[\d+\/\d+\]/.test(line))         return 'text-info';
   if (/complete|success|\bOK\b|found|acquired|written|deployed/i.test(line))
                                          return 'text-success';
   if (line.trimStart().startsWith('->')) return 'text-base-content/60';

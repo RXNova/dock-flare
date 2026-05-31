@@ -6,6 +6,8 @@ use crate::cloudflare;
 use crate::config::{self, Project, TunnelConfig};
 use crate::orchestrate;
 
+pub struct DeployLock(pub tokio::sync::Mutex<()>);
+
 // ── Return type for tunnel list ───────────────────────────────────────────────
 
 #[derive(Serialize, Clone)]
@@ -57,7 +59,10 @@ pub async fn list_project_tunnels(
         .unwrap_or_default();
 
     if project.auth_mode == "token" && !project.api_token.is_empty() {
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| e.to_string())?;
         let cf_tunnels = cloudflare::list_tunnels(&client, &project.api_token, &project.account_id)
             .await?;
 
@@ -90,12 +95,16 @@ pub async fn list_project_tunnels(
 #[tauri::command]
 pub async fn deploy_tunnel(
     app: AppHandle,
+    state: tauri::State<'_, DeployLock>,
     project: Project,
     tunnel: TunnelConfig,
 ) -> Result<(), String> {
+    let _lock = state.0.try_lock()
+        .map_err(|_| "Another operation is already in progress".to_string())?;
+
     orchestrate::emit(&app, &format!("=== DockFlare Deploy [{}] ===", project.domain));
 
-    let tunnel_id = if project.auth_mode == "browser" {
+    let (tunnel_id, local_pid) = if project.auth_mode == "browser" {
         orchestrate::deploy_browser(&app, &project.id, &tunnel).await
     } else {
         orchestrate::deploy_token(&app, &project, &tunnel).await
@@ -103,16 +112,17 @@ pub async fn deploy_tunnel(
 
     orchestrate::emit(&app, "=== Deploy complete ===");
 
-    // Persist tunnel metadata so list/teardown work correctly
     let mut projects = config::load(&app);
     if let Some(p) = projects.iter_mut().find(|p| p.id == project.id) {
         p.tunnels.retain(|t| t.name != tunnel.tunnel_name);
         p.tunnels.push(config::TunnelMeta {
-            id:        tunnel_id,
-            name:      tunnel.tunnel_name,
-            hostname:  tunnel.public_hostname,
-            service:   tunnel.internal_service,
-            namespace: tunnel.k8s_namespace,
+            id:          tunnel_id,
+            name:        tunnel.tunnel_name,
+            hostname:    tunnel.public_hostname,
+            service:     tunnel.internal_service,
+            namespace:   tunnel.k8s_namespace,
+            target_type: tunnel.target_type,
+            pid:         local_pid,
         });
     }
     config::save(&app, &projects);
@@ -125,22 +135,33 @@ pub async fn deploy_tunnel(
 #[tauri::command]
 pub async fn teardown_tunnel(
     app: AppHandle,
+    state: tauri::State<'_, DeployLock>,
     project: Project,
     tunnel_name: String,
     hostname: String,
     namespace: String,
 ) -> Result<(), String> {
+    let _lock = state.0.try_lock()
+        .map_err(|_| "Another operation is already in progress".to_string())?;
+
     orchestrate::emit(&app, &format!("=== DockFlare Teardown [{}] ===", project.domain));
 
+    // Look up stored target_type and pid for correct cleanup
+    let (target_type, pid) = config::load(&app)
+        .into_iter()
+        .find(|p| p.id == project.id)
+        .and_then(|p| p.tunnels.into_iter().find(|t| t.name == tunnel_name))
+        .map(|m| (m.target_type, m.pid))
+        .unwrap_or_else(|| (String::new(), None));
+
     let result = if project.auth_mode == "browser" {
-        orchestrate::teardown_browser(&app, &project.id, &tunnel_name, &namespace).await
+        orchestrate::teardown_browser(&app, &project.id, &tunnel_name, &namespace, &target_type, pid).await
     } else {
-        orchestrate::teardown_token(&app, &project, &tunnel_name, &hostname, &namespace).await
+        orchestrate::teardown_token(&app, &project, &tunnel_name, &hostname, &namespace, &target_type, pid).await
     };
 
     if result.is_ok() {
         orchestrate::emit(&app, "=== Teardown complete ===");
-        // Remove from local metadata
         let mut projects = config::load(&app);
         if let Some(p) = projects.iter_mut().find(|p| p.id == project.id) {
             p.tunnels.retain(|t| t.name != tunnel_name);
@@ -178,7 +199,10 @@ fn parse_argo_token(cert_path: &std::path::PathBuf) -> Option<(String, String, S
 /// The discovered zone becomes the project's domain — the user never types it.
 #[tauri::command]
 pub async fn discover_zone(project: Project) -> Result<ZoneInfo, String> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())?;
 
     if project.auth_mode == "browser" {
         let cert = orchestrate::project_cert_path(&project.id);
